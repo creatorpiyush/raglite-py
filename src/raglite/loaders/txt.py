@@ -1,5 +1,5 @@
-from .base import BaseLoader
 from ..errors import LoaderError
+from .base import BaseLoader
 
 
 class TxtLoader(BaseLoader):
@@ -7,7 +7,7 @@ class TxtLoader(BaseLoader):
         try:
             with open(self.file_path, "r", encoding="utf-8") as f:
                 return f.read().strip()
-        except Exception as cause:
+        except Exception:
             try:
                 with open(self.file_path, "r", encoding="latin1") as f:
                     return f.read().strip()

@@ -3,11 +3,11 @@ Unit tests for Retriever — mirrors tests/unit/retriever.test.ts
 All provider calls are mocked so tests run offline.
 """
 import math
-import pytest
 from unittest.mock import MagicMock
+
 from raglite.retrieval.retriever import Retriever
+from raglite.types import ChunkMetadata
 from raglite.vectordb.base import VectorSearchHit
-from raglite.types import ChunkMetadata, SearchResult
 
 
 def unit_vec(vec):

@@ -2,12 +2,13 @@
 Integration tests for Document build/cache lifecycle — mirrors tests/integration/document.test.ts
 All embedding calls are mocked so tests run offline.
 """
-import math
 import os
 import shutil
 import tempfile
+from unittest.mock import patch
+
 import pytest
-from unittest.mock import MagicMock, patch
+
 from raglite.core.document import Document
 from raglite.errors import FileNotIndexedError, LoaderError
 

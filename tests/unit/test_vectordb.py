@@ -5,9 +5,11 @@ import math
 import os
 import shutil
 import tempfile
+
 import pytest
+
+from raglite.types import ChunkMetadata, StoredChunk
 from raglite.vectordb.memory import MemoryVectorStore
-from raglite.types import StoredChunk, ChunkMetadata
 
 
 def unit_vec(vec):
@@ -72,6 +74,7 @@ class TestMemoryVectorStore:
         store.load()
         store.add([make_chunk("x", "x", [1, 0, 0])])
         from datetime import datetime, timezone
+
         from raglite.types import IndexMetadata
         store.save_index_metadata(IndexMetadata(
             version="0.1.0",

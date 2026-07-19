@@ -1,5 +1,5 @@
-from .base import BaseLoader
 from ..errors import LoaderError
+from .base import BaseLoader
 
 
 class MarkdownLoader(BaseLoader):

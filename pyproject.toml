@@ -8,7 +8,7 @@ packages = ["src/raglite"]
 
 [project]
 name = "raglite-toolkit"
-version = "1.0.2"
+version = "1.1.0"
 description = "Build semantic search, multi-provider question answering, and REST APIs over your documents in a few lines of Python."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -65,6 +65,7 @@ dev = [
     "httpx>=0.25.0",
     "build>=1.0.0",
     "twine>=5.0.0",
+    "ruff>=0.4.0",
 ]
 
 [tool.pytest.ini_options]
@@ -72,3 +73,13 @@ asyncio_mode = "auto"
 markers = [
     "ollama: marks tests that require a live Ollama instance (deselect with '-m not ollama')",
 ]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]  # line-too-long handled by formatter
+
+[tool.ruff.lint.isort]
+known-first-party = ["raglite"]

@@ -1,14 +1,15 @@
-from typing import Optional, Union, Dict, Any
-from pydantic import BaseModel, Field, ConfigDict
+from typing import Any, Dict, Optional, Union
 
-from .types import EmbeddingProviderConfig, LLMProviderConfig
+from pydantic import BaseModel, ConfigDict, Field
+
 from .constants import (
-    DEFAULT_CHUNK_SIZE,
     DEFAULT_CHUNK_OVERLAP,
-    DEFAULT_TOP_K,
+    DEFAULT_CHUNK_SIZE,
     DEFAULT_SCORE_THRESHOLD,
     DEFAULT_STORE_DIRNAME,
+    DEFAULT_TOP_K,
 )
+from .types import EmbeddingProviderConfig, LLMProviderConfig, VectorStoreProviderConfig
 
 
 class DocumentOptions(BaseModel):
@@ -21,6 +22,7 @@ class DocumentOptions(BaseModel):
     storeDir: Optional[str] = Field(default=None, alias="storeDir")
     embeddings: Optional[EmbeddingProviderConfig] = None
     llm: Optional[LLMProviderConfig] = None
+    vectorStore: Optional[VectorStoreProviderConfig] = Field(default=None, alias="vectorStore")
     logLevel: Optional[str] = Field(default=None, alias="logLevel")
 
 
@@ -34,6 +36,7 @@ class ResolvedConfig(BaseModel):
     storeDir: str = Field(..., alias="storeDir")
     embeddings: EmbeddingProviderConfig
     llm: Optional[LLMProviderConfig] = None
+    vectorStore: Optional[VectorStoreProviderConfig] = Field(default=None, alias="vectorStore")
     logLevel: str = Field(..., alias="logLevel")
 
 
@@ -61,5 +64,6 @@ def resolve_config(options: Optional[Union[DocumentOptions, Dict[str, Any]]] = N
         storeDir=store_dir,
         embeddings=embeddings,
         llm=opts.llm,
+        vectorStore=opts.vectorStore,
         logLevel=log_level
     )

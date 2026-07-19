@@ -4,11 +4,11 @@ Unit tests for the CLI — mirrors tests/unit/cli.test.ts
 import json
 import os
 import shutil
-import sys
 import tempfile
-import pytest
 from io import StringIO
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
+
+import pytest
 
 
 @pytest.fixture

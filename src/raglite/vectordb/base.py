@@ -1,8 +1,9 @@
 from abc import ABC, abstractmethod
 from typing import List, Optional
+
 from pydantic import BaseModel
 
-from ..types import ChunkMetadata, StoredChunk, IndexMetadata
+from ..types import ChunkMetadata, IndexMetadata, StoredChunk
 
 
 class VectorSearchHit(BaseModel):

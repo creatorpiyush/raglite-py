@@ -1,6 +1,7 @@
 from pypdf import PdfReader
-from .base import BaseLoader
+
 from ..errors import LoaderError
+from .base import BaseLoader
 
 
 class PdfLoader(BaseLoader):

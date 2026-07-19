@@ -1,11 +1,12 @@
 import os
+
+from ..errors import UnsupportedFileTypeError
 from .base import BaseLoader
 from .docx import DocxLoader
 from .json import JsonLoader
 from .markdown import MarkdownLoader
 from .pdf import PdfLoader
 from .txt import TxtLoader
-from ..errors import UnsupportedFileTypeError
 
 LOADERS = {
     ".pdf": PdfLoader,

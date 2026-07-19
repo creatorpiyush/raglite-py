@@ -1,5 +1,5 @@
 import sys
-from typing import Literal, Any
+from typing import Any, Literal
 
 LogLevel = Literal["silent", "info", "debug"]
 

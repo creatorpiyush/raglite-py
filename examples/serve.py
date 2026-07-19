@@ -1,6 +1,6 @@
 import os
-import sys
 import time
+
 from raglite import Document
 
 

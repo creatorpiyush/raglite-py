@@ -1,7 +1,8 @@
 import re
 from typing import List
-from .base import BaseChunker
+
 from ..errors import ChunkingError
+from .base import BaseChunker
 
 
 class RecursiveChunker(BaseChunker):

@@ -5,6 +5,7 @@ import math
 import os
 import shutil
 import tempfile
+
 import pytest
 
 # ── Ollama connectivity constants ────────────────────────────────────────────
@@ -16,7 +17,8 @@ OLLAMA_EMBED_MODEL = "embeddinggemma:latest"
 def _ollama_running() -> bool:
     """Return True if Ollama is reachable and both required models are pulled."""
     try:
-        import urllib.request, json
+        import json
+        import urllib.request
         with urllib.request.urlopen(f"{OLLAMA_BASE_URL}/api/tags", timeout=2) as r:
             data = json.loads(r.read())
         available = {m["name"] for m in data.get("models", [])}

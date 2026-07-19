@@ -1,8 +1,8 @@
-from typing import List, Optional, Union, Dict, Any
+from typing import Any, Dict, List, Optional
 
 from ..embeddings.base import Embedder
-from ..vectordb.base import VectorStore
 from ..types import SearchResult
+from ..vectordb.base import VectorStore
 
 
 class Retriever:

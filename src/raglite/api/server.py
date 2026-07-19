@@ -1,16 +1,17 @@
-import time
 import threading
-from typing import Optional, Dict, Any, Union
+import time
+from typing import Any, Dict, Optional
+
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request, Depends
-from fastapi.responses import StreamingResponse, JSONResponse
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import ValidationError
 
-from ..constants import PACKAGE_VERSION, DEFAULT_HOST, DEFAULT_PORT
-from ..errors import RagLiteError
+from ..constants import DEFAULT_HOST, DEFAULT_PORT, PACKAGE_VERSION
 from ..embeddings.models import DEFAULT_EMBEDDING_MODELS
-from .schemas import SearchRequest, AskRequest
+from ..errors import RagLiteError
+from .schemas import AskRequest, SearchRequest
 
 security = HTTPBearer(auto_error=False)
 

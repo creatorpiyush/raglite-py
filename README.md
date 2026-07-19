@@ -74,6 +74,69 @@ print(doc.ask("What is the refund policy?").text)
 
 ---
 
+## Pluggable Vector Databases
+
+By default, `raglite` uses a lightweight in-memory vector store that persists indexes locally to JSON files. You can swap it out for a local or cloud-backed vector database by passing `vectorStore` in the options dict.
+
+### Memory Store (Default)
+
+```python
+doc = Document("./policy.pdf", {
+    "vectorStore": {"provider": "memory", "storeDir": ".raglite"},
+})
+```
+
+### Qdrant (Local or Cloud)
+
+Supports local Docker instances and Qdrant Cloud clusters.
+
+```python
+doc = Document("./policy.pdf", {
+    "embeddings": {"provider": "local"},
+    "vectorStore": {
+        "provider": "qdrant",
+        "url": "http://localhost:6333",   # or Qdrant Cloud URL
+        "apiKey": "your-qdrant-api-key",  # optional
+        "indexName": "my_collection",     # optional
+    },
+})
+```
+
+### Pinecone (Cloud)
+
+Scopes collections using Pinecone's native namespaces.
+
+```python
+doc = Document("./policy.pdf", {
+    "embeddings": {"provider": "openai", "apiKey": "sk-..."},
+    "vectorStore": {
+        "provider": "pinecone",
+        "url": "https://your-index-host.svc.pinecone.io",
+        "apiKey": "your-pinecone-api-key",
+    },
+})
+```
+
+### Custom Vector Store Class
+
+Implement the `VectorStore` ABC and pass an instance directly.
+
+```python
+from raglite.vectordb.base import VectorStore, VectorSearchHit
+from raglite.types import IndexMetadata, StoredChunk
+
+class MyStore(VectorStore):
+    # Implement: load, reset, add, search, count,
+    #            save_index_metadata, read_index_metadata
+    ...
+
+doc = Document("./policy.pdf", {
+    "vectorStore": MyStore(),
+})
+```
+
+
+
 ## Choose Any LLM at Ask-Time
 
 ```python

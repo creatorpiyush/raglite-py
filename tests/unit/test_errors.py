@@ -1,17 +1,16 @@
 """
 Unit tests for errors — mirrors tests/unit/errors.test.ts
 """
-import pytest
 from raglite.errors import (
+    ChunkingError,
+    ConfigError,
+    EmbeddingError,
+    FileNotIndexedError,
+    LLMError,
+    LoaderError,
     RagLiteError,
     UnsupportedFileTypeError,
-    FileNotIndexedError,
-    LoaderError,
-    ChunkingError,
-    EmbeddingError,
     VectorDBError,
-    LLMError,
-    ConfigError,
 )
 
 
