@@ -1,6 +1,6 @@
-import sys
-import json
 import argparse
+import json
+import sys
 import time
 from typing import Optional
 

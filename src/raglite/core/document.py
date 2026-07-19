@@ -1,19 +1,19 @@
-from datetime import datetime
 import os
-from typing import Optional, Union, Dict, Any, Generator
+from datetime import datetime
+from typing import Any, Dict, Generator, Optional, Union
 
+from ..chunking import RecursiveChunker
 from ..config import DocumentOptions, ResolvedConfig, resolve_config
 from ..constants import PACKAGE_VERSION
-from ..errors import LoaderError, RagLiteError, FileNotIndexedError
-from ..loaders import get_loader
-from ..chunking import RecursiveChunker
-from ..embeddings import create_embedder, Embedder
-from ..vectordb import MemoryVectorStore
-from ..retrieval import Retriever
+from ..embeddings import Embedder, create_embedder
+from ..errors import FileNotIndexedError, LoaderError, RagLiteError
 from ..llm import generate_answer, stream_answer
-from ..types import StoredChunk, ChunkMetadata, IndexMetadata, AnswerResult
+from ..loaders import get_loader
+from ..retrieval import Retriever
+from ..types import AnswerResult, ChunkMetadata, IndexMetadata, StoredChunk
 from ..utils.hash import hash_file, namespace_from_path
 from ..utils.logger import create_logger
+from ..vectordb import MemoryVectorStore, VectorStore, create_vector_store
 
 
 class Document:
@@ -26,7 +26,18 @@ class Document:
         self.config: ResolvedConfig = resolve_config(options)
         self.logger = create_logger(self.config.logLevel)
         self.namespace = namespace_from_path(self.file_path)
-        self.store = MemoryVectorStore(self.config.storeDir, self.namespace)
+
+        # Resolve vector store — options may provide a VectorStore instance directly,
+        # a VectorStoreProviderConfig dict/object, or fall back to the in-memory default.
+        raw_opts = options if isinstance(options, dict) else {}
+        raw_store = raw_opts.get("vectorStore") if raw_opts else None
+        if isinstance(raw_store, VectorStore):
+            self.store: VectorStore = raw_store
+        elif self.config.vectorStore is not None:
+            self.store = create_vector_store(self.config.vectorStore, self.namespace)
+        else:
+            self.store = MemoryVectorStore(self.config.storeDir, self.namespace)
+
         self.embedder: Optional[Embedder] = None
         self.ready = False
 

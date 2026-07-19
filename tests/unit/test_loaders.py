@@ -5,9 +5,11 @@ import json
 import os
 import shutil
 import tempfile
+
 import pytest
-from raglite.loaders import get_loader, TxtLoader, MarkdownLoader, JsonLoader
-from raglite.errors import UnsupportedFileTypeError, LoaderError
+
+from raglite.errors import LoaderError, UnsupportedFileTypeError
+from raglite.loaders import JsonLoader, MarkdownLoader, TxtLoader, get_loader
 
 
 @pytest.fixture
@@ -35,7 +37,7 @@ class TestGetLoader:
             get_loader(path)
 
     def test_returns_correct_loader_for_each_extension(self, tmp_dir):
-        from raglite.loaders import TxtLoader, MarkdownLoader, JsonLoader, PdfLoader, DocxLoader
+        from raglite.loaders import JsonLoader, MarkdownLoader, TxtLoader
         path_txt = write_file(tmp_dir, "a.txt", "hello")
         path_md = write_file(tmp_dir, "b.md", "# Hi")
         path_json = write_file(tmp_dir, "c.json", "{}")

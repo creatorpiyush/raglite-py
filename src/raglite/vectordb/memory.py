@@ -1,11 +1,11 @@
-import os
 import json
+import os
 import shutil
 from typing import List, Optional
 
-from .base import VectorStore, VectorSearchHit
-from ..types import StoredChunk, IndexMetadata
 from ..errors import VectorDBError
+from ..types import IndexMetadata, StoredChunk
+from .base import VectorSearchHit, VectorStore
 
 
 class MemoryVectorStore(VectorStore):

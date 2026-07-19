@@ -2,6 +2,7 @@
 Unit tests for RecursiveChunker — mirrors tests/unit/chunking.test.ts
 """
 import pytest
+
 from raglite.chunking.recursive import RecursiveChunker
 from raglite.errors import ChunkingError
 

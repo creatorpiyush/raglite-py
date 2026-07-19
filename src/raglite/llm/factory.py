@@ -1,9 +1,9 @@
 import os
-from typing import Optional, Any, Union
+from typing import Any, Optional, Union
 
+from ..errors import LLMError
 from ..types import LLMProviderConfig, LLMProviderName
 from .models import DEFAULT_LLM_MODELS
-from ..errors import LLMError
 
 
 class ResolvedLLM:

@@ -1,14 +1,13 @@
 """
 Unit tests for config — mirrors tests/unit/config.test.ts
 """
-import pytest
-from raglite.config import resolve_config, DocumentOptions
+from raglite.config import resolve_config
 from raglite.constants import (
-    DEFAULT_CHUNK_SIZE,
     DEFAULT_CHUNK_OVERLAP,
-    DEFAULT_TOP_K,
+    DEFAULT_CHUNK_SIZE,
     DEFAULT_SCORE_THRESHOLD,
     DEFAULT_STORE_DIRNAME,
+    DEFAULT_TOP_K,
 )
 
 

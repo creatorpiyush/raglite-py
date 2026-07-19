@@ -15,13 +15,15 @@ Skip them in CI / offline:
 """
 import os
 import shutil
-import tempfile
+
 import pytest
+
 from raglite.core.document import Document
-from raglite.errors import FileNotIndexedError
 
 # ── Shared config ─────────────────────────────────────────────────────────────
-from tests.conftest import OLLAMA_BASE_URL, OLLAMA_LLM_MODEL, OLLAMA_EMBED_MODEL
+OLLAMA_BASE_URL   = "http://localhost:11434"
+OLLAMA_LLM_MODEL  = "gemma3:latest"
+OLLAMA_EMBED_MODEL = "embeddinggemma:latest"
 
 EMBED_CONFIG = {
     "provider": "ollama",
@@ -328,3 +330,168 @@ class TestOllamaStreaming:
         """askStream() TypeScript alias should work identically to ask_stream()."""
         chunks = list(built_doc.askStream("What is the warranty period?"))
         assert len(chunks) > 0
+
+
+# ── Dedicated Memory Store tests ──────────────────────────────────────────────
+
+@pytest.mark.ollama
+class TestOllamaWithMemoryStore:
+    """
+    Explicit end-to-end tests that pin the vector store to MemoryVectorStore
+    and the embedder/LLM to local Ollama.
+
+    Each test is self-contained (builds its own index) so it can be run
+    independently with: pytest -m ollama -k "TestOllamaWithMemoryStore" -v
+    """
+
+    @pytest.fixture(autouse=True)
+    def _require_ollama(self, ollama_available):
+        """Skip the whole class if Ollama is unavailable."""
+
+    @pytest.fixture()
+    def doc(self, policy_file, tmp_path):
+        """Build a fresh MemoryVectorStore-backed document for each test."""
+        d = Document(policy_file, {
+            "embeddings": EMBED_CONFIG,
+            "llm":        LLM_CONFIG,
+            "chunkSize":  80,
+            "overlap":    10,
+            "storeDir":   str(tmp_path),
+            # vectorStore omitted → defaults to MemoryVectorStore
+        })
+        d.build(rebuild=True)
+        return d
+
+    # ── Index & store verification ─────────────────────────────────
+
+    def test_memory_store_is_used_by_default(self, doc):
+        """Document should default to MemoryVectorStore when vectorStore is not set."""
+        from raglite.vectordb.memory import MemoryVectorStore
+        assert isinstance(doc.store, MemoryVectorStore)
+
+    def test_memory_store_chunk_count_is_positive(self, doc):
+        assert doc.store.count() > 0
+
+    def test_metadata_embedding_provider_is_ollama(self, doc):
+        meta = doc.store.read_index_metadata()
+        assert meta is not None
+        assert meta.embeddingProvider == "ollama"
+
+    def test_metadata_dimensions_positive(self, doc):
+        meta = doc.store.read_index_metadata()
+        assert meta is not None
+        assert meta.embeddingDimensions > 0
+
+    # ── Cache invalidation ────────────────────────────────────────
+
+    def test_rebuild_true_produces_fresh_index(self, policy_file, tmp_path):
+        opts = {
+            "embeddings": EMBED_CONFIG,
+            "llm":        LLM_CONFIG,
+            "chunkSize":  80,
+            "overlap":    10,
+            "storeDir":   str(tmp_path),
+        }
+        d = Document(policy_file, opts)
+        r1 = d.build(rebuild=True)
+        assert r1["cached"] is False
+
+    def test_second_build_uses_cache(self, policy_file, tmp_path):
+        opts = {
+            "embeddings": EMBED_CONFIG,
+            "llm":        LLM_CONFIG,
+            "chunkSize":  80,
+            "overlap":    10,
+            "storeDir":   str(tmp_path),
+        }
+        d = Document(policy_file, opts)
+        d.build(rebuild=True)          # prime cache
+        r2 = d.build()                 # should hit cache
+        assert r2["cached"] is True
+
+    # ── Semantic search ───────────────────────────────────────────
+
+    def test_search_returns_results(self, doc):
+        hits = doc.search("refund policy", top_k=3)
+        assert len(hits) > 0
+
+    def test_search_scores_between_0_and_1(self, doc):
+        hits = doc.search("shipping policy", top_k=5)
+        for h in hits:
+            assert 0.0 <= h.score <= 1.0, f"Score out of range: {h.score}"
+
+    def test_search_hits_have_non_empty_text(self, doc):
+        hits = doc.search("warranty coverage", top_k=3)
+        for h in hits:
+            assert h.text.strip() != ""
+
+    def test_search_top_k_respected(self, doc):
+        for k in (1, 2, 3):
+            hits = doc.search("privacy", top_k=k)
+            assert len(hits) <= k
+
+    # ── Ask (RAG Q&A) ─────────────────────────────────────────────
+
+    def test_ask_returns_non_empty_text(self, doc):
+        answer = doc.ask("What is the refund policy?", {"topK": 3})
+        assert answer.text.strip() != ""
+
+    def test_ask_provider_is_ollama(self, doc):
+        answer = doc.ask("What is the refund policy?")
+        assert answer.provider == "ollama"
+
+    def test_ask_refund_question_mentions_days(self, doc):
+        answer = doc.ask("How many days do I have to request a refund?")
+        assert any(kw in answer.text.lower() for kw in ["30", "thirty", "day"])
+
+    def test_ask_shipping_question_plausible(self, doc):
+        answer = doc.ask("How long does standard shipping take?")
+        assert any(kw in answer.text.lower() for kw in ["3", "5", "day", "business", "shipping"])
+
+    # ── Streaming ─────────────────────────────────────────────────
+
+    def test_ask_stream_yields_chunks(self, doc):
+        chunks = list(doc.ask_stream("Give a brief summary of this document."))
+        assert len(chunks) > 0
+
+    def test_ask_stream_text_is_non_empty(self, doc):
+        full = "".join(doc.ask_stream("What does the warranty cover?"))
+        assert full.strip() != ""
+
+    def test_ask_stream_and_ask_consistent(self, doc):
+        q = "What is the refund window?"
+        streamed = "".join(doc.ask_stream(q, {"topK": 3})).lower()
+        asked = doc.ask(q, {"topK": 3}).text.lower()
+        # Both should reference refund-related terms
+        for text in (streamed, asked):
+            assert any(kw in text for kw in ["30", "refund", "day", "thirty"])
+
+    # ── Isolation — two documents, no collisions ───────────────────
+
+    def test_two_docs_with_different_content_do_not_collide(self, tmp_path):
+        path_a = os.path.join(str(tmp_path), "a.txt")
+        path_b = os.path.join(str(tmp_path), "b.txt")
+        with open(path_a, "w") as f:
+            f.write("Alpha document about alpha topics and alpha content. " * 10)
+        with open(path_b, "w") as f:
+            f.write("Beta document about beta topics and beta content. " * 10)
+
+        doc_a = Document(path_a, {
+            "embeddings": EMBED_CONFIG,
+            "chunkSize": 30, "overlap": 5,
+            "storeDir": str(tmp_path),
+        })
+        doc_b = Document(path_b, {
+            "embeddings": EMBED_CONFIG,
+            "chunkSize": 30, "overlap": 5,
+            "storeDir": str(tmp_path),
+        })
+        doc_a.build(rebuild=True)
+        doc_b.build(rebuild=True)
+
+        # Namespaces must differ
+        assert doc_a.namespace != doc_b.namespace
+        # Each store should contain only its own chunks
+        assert doc_a.store.count() > 0
+        assert doc_b.store.count() > 0
+

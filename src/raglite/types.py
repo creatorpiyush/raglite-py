@@ -1,5 +1,6 @@
-from typing import Literal, Optional, List, Any, Dict
-from pydantic import BaseModel, Field, ConfigDict
+from typing import Dict, List, Literal, Optional
+
+from pydantic import BaseModel, ConfigDict, Field
 
 LLMProviderName = Literal[
     "openai",
@@ -21,6 +22,18 @@ EmbeddingProviderName = Literal[
     "ollama",
     "local"
 ]
+
+VectorStoreProviderName = Literal["memory", "qdrant", "pinecone"]
+
+
+class VectorStoreProviderConfig(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    provider: VectorStoreProviderName
+    url: Optional[str] = None
+    api_key: Optional[str] = Field(default=None, alias="apiKey")
+    index_name: Optional[str] = Field(default=None, alias="indexName")
+    store_dir: Optional[str] = Field(default=None, alias="storeDir")
 
 
 class LLMProviderConfig(BaseModel):

@@ -1,58 +1,24 @@
-from .constants import PACKAGE_NAME, PACKAGE_VERSION
-
-VERSION = PACKAGE_VERSION
-
-from .errors import (
-    RagLiteError,
-    UnsupportedFileTypeError,
-    FileNotIndexedError,
-    LoaderError,
-    ChunkingError,
-    EmbeddingError,
-    VectorDBError,
-    LLMError,
-    ConfigError,
-)
-
-from .types import (
-    LLMProviderName,
-    EmbeddingProviderName,
-    LLMProviderConfig,
-    EmbeddingProviderConfig,
-    ChunkMetadata,
-    StoredChunk,
-    SearchResult,
-    AnswerResult,
-    IndexMetadata,
-)
-
-from .config import DocumentOptions, resolve_config
-
-from .utils.logger import create_logger
-
-from .loaders import (
-    BaseLoader,
-    TxtLoader,
-    MarkdownLoader,
-    JsonLoader,
-    PdfLoader,
-    DocxLoader,
-    get_loader,
-)
-
 from .chunking import BaseChunker, RecursiveChunker
-
-from .vectordb import MemoryVectorStore
-
-from .retrieval import Retriever
-
+from .config import DocumentOptions, resolve_config
+from .constants import PACKAGE_NAME, PACKAGE_VERSION
+from .core.document import Document
 from .embeddings import (
     DEFAULT_EMBEDDING_MODELS,
     LocalEmbedder,
     RemoteEmbedder,
     create_embedder,
 )
-
+from .errors import (
+    ChunkingError,
+    ConfigError,
+    EmbeddingError,
+    FileNotIndexedError,
+    LLMError,
+    LoaderError,
+    RagLiteError,
+    UnsupportedFileTypeError,
+    VectorDBError,
+)
 from .llm import (
     DEFAULT_LLM_MODELS,
     build_system_prompt,
@@ -61,8 +27,31 @@ from .llm import (
     generate_answer,
     stream_answer,
 )
+from .loaders import (
+    BaseLoader,
+    DocxLoader,
+    JsonLoader,
+    MarkdownLoader,
+    PdfLoader,
+    TxtLoader,
+    get_loader,
+)
+from .retrieval import Retriever
+from .types import (
+    AnswerResult,
+    ChunkMetadata,
+    EmbeddingProviderConfig,
+    EmbeddingProviderName,
+    IndexMetadata,
+    LLMProviderConfig,
+    LLMProviderName,
+    SearchResult,
+    StoredChunk,
+)
+from .utils.logger import create_logger
+from .vectordb import MemoryVectorStore
 
-from .core.document import Document
+VERSION = PACKAGE_VERSION
 
 __all__ = [
     "PACKAGE_NAME",

@@ -17,7 +17,8 @@ Usage:
 """
 import os
 import time
-from raglite import Document, LLMProviderConfig
+
+from raglite import Document
 
 QUESTION = "Summarize the document in three bullet points."
 

@@ -1,8 +1,9 @@
 from typing import Union
+
+from ..types import EmbeddingProviderConfig
 from .base import Embedder
 from .local import LocalEmbedder
 from .remote import RemoteEmbedder
-from ..types import EmbeddingProviderConfig
 
 
 def create_embedder(config: Union[EmbeddingProviderConfig, dict]) -> Embedder:

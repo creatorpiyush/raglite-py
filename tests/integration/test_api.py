@@ -2,11 +2,13 @@
 Integration tests for FastAPI REST endpoints — mirrors tests/integration/api.test.ts
 Uses FastAPI TestClient for in-memory HTTP request/response validation.
 """
+from unittest.mock import MagicMock
+
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import MagicMock, patch
+
 from raglite.api.server import build_app
-from raglite.types import SearchResult, ChunkMetadata, AnswerResult
+from raglite.types import AnswerResult, ChunkMetadata, SearchResult
 
 
 def make_result(id_, text):

@@ -2,9 +2,9 @@ import math
 import os
 from typing import List, Optional
 
-from .base import Embedder
-from ..types import EmbeddingProviderConfig, EmbeddingProviderName
 from ..errors import EmbeddingError
+from ..types import EmbeddingProviderConfig, EmbeddingProviderName
+from .base import Embedder
 from .models import DEFAULT_EMBEDDING_MODELS
 
 

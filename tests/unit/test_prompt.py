@@ -1,9 +1,8 @@
 """
 Unit tests for prompt builders — mirrors tests/unit/prompt.test.ts
 """
-import pytest
 from raglite.llm.prompt import build_system_prompt, build_user_prompt
-from raglite.types import SearchResult, ChunkMetadata
+from raglite.types import ChunkMetadata, SearchResult
 
 
 def make_result(id_, text, source="doc.txt", chunk=1, total=3, score=0.9):
