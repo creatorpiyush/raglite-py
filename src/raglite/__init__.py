@@ -1,6 +1,7 @@
 from .chunking import BaseChunker, RecursiveChunker
 from .config import DocumentOptions, resolve_config
 from .constants import PACKAGE_NAME, PACKAGE_VERSION
+from .core.collection import DocumentCollection
 from .core.document import Document
 from .embeddings import (
     DEFAULT_EMBEDDING_MODELS,
@@ -29,12 +30,16 @@ from .llm import (
 )
 from .loaders import (
     BaseLoader,
+    DirectoryLoader,
     DocxLoader,
     JsonLoader,
     MarkdownLoader,
     PdfLoader,
     TxtLoader,
+    WebLoader,
     get_loader,
+    is_supported_file,
+    is_url,
 )
 from .retrieval import Retriever
 from .types import (
@@ -79,12 +84,16 @@ __all__ = [
     "resolve_config",
     "create_logger",
     "BaseLoader",
+    "DirectoryLoader",
+    "WebLoader",
     "TxtLoader",
     "MarkdownLoader",
     "JsonLoader",
     "PdfLoader",
     "DocxLoader",
     "get_loader",
+    "is_supported_file",
+    "is_url",
     "BaseChunker",
     "RecursiveChunker",
     "MemoryVectorStore",
@@ -100,4 +109,5 @@ __all__ = [
     "generate_answer",
     "stream_answer",
     "Document",
+    "DocumentCollection",
 ]

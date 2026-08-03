@@ -82,12 +82,15 @@ def build_app(document: Any, options: Dict[str, Any]) -> FastAPI:
 
     @app.get("/health")
     async def health():
-        return {
+        namespace = getattr(document, "store_namespace", None)
+        res = {
             "status": "ok",
             "version": PACKAGE_VERSION,
             "chunks": document.chunk_count,
-            "namespace": document.store_namespace,
         }
+        if namespace is not None:
+            res["namespace"] = namespace
+        return res
 
     dependencies = [Depends(authorize)] if bearer_token else []
 

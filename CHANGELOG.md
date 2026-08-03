@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.2.0] - 2026-08-02
+
+### Added
+- **Multi-Document & Directory Ingestion (`DocumentCollection`):**
+  - Added `DocumentCollection` class to manage semantic indexing, multi-document retrieval, and Q&A across folders, glob patterns, web URLs, and mixed file lists.
+  - Parallel semantic search over collection vector stores with score-based top-$K$ merging and ranking.
+  - Contextual Q&A synthesis (`ask` and `ask_stream`) across multi-document collections.
+- **Directory Loader (`DirectoryLoader`):**
+  - Recursive directory scanner (`recursive=True`) with glob pattern matching (e.g. `./docs/**/*.md`).
+  - Auto-detection of supported extensions (`.pdf`, `.txt`, `.md`, `.json`, `.docx`).
+  - Detailed error reporting and warning logs for unsupported/empty files.
+- **Web Loader (`WebLoader`):**
+  - Native loader for fetching HTTP/HTTPS web URLs directly.
+  - Automatic HTML cleaning into formatted text/markdown with script, style, and SVG tag stripping.
+  - JSON and plain text content-type parsing.
+- **CLI & FastAPI REST Server Support:**
+  - Upgraded `raglite index`, `search`, `ask`, and `serve` CLI commands to process directories, glob patterns, and URLs.
+  - Updated FastAPI REST server to support `DocumentCollection` and single `Document` targets.
+- **Unit & Integration Tests:**
+  - Added unit and integration tests for `DirectoryLoader`, `WebLoader`, and `DocumentCollection`.
+
 ## [1.1.0] - 2026-07-19
 
 ### Added
