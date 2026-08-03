@@ -1,19 +1,22 @@
 import argparse
 import json
+import os
 import sys
 import time
-from typing import Optional
+from typing import Optional, Union
 
 from .constants import PACKAGE_VERSION
+from .core.collection import DocumentCollection
 from .core.document import Document
+from .loaders import is_url
 
 HELP = f"""raglite v{PACKAGE_VERSION}
 
 Usage:
-  raglite index <file>   [--chunk-size N] [--overlap N] [--embed-provider P] [--embed-model M] [--embed-key K] [--rebuild]
-  raglite search <file> "query"   [--top-k N]
-  raglite ask <file> "question"   --llm-provider P [--llm-model M] [--llm-key K] [--stream]
-  raglite serve <file>            --llm-provider P [--llm-key K] [--host H] [--port N] [--token T]
+  raglite index <path|url>   [--chunk-size N] [--overlap N] [--embed-provider P] [--embed-model M] [--embed-key K] [--rebuild]
+  raglite search <path|url> "query"   [--top-k N]
+  raglite ask <path|url> "question"   --llm-provider P [--llm-model M] [--llm-key K] [--stream]
+  raglite serve <path|url>            --llm-provider P [--llm-key K] [--host H] [--port N] [--token T]
   raglite --help
   raglite --version
 
@@ -45,6 +48,15 @@ def parse_llm(args_dict: dict) -> Optional[dict]:
     return config
 
 
+def resolve_target(source: str, options: dict) -> Union[Document, DocumentCollection]:
+    if is_url(source):
+        return Document(source, options)
+    resolved = os.path.abspath(source)
+    if os.path.exists(resolved) and os.path.isdir(resolved):
+        return DocumentCollection(resolved, options)
+    return Document(source, options)
+
+
 def run_index(args):
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("file")
@@ -58,7 +70,7 @@ def run_index(args):
     parsed = parser.parse_args(args)
 
     embeddings = parse_common_embedding(vars(parsed))
-    doc = Document(parsed.file, {"embeddings": embeddings})
+    target = resolve_target(parsed.file, {"embeddings": embeddings})
 
     build_opts = {}
     if parsed.chunk_size is not None:
@@ -68,8 +80,9 @@ def run_index(args):
     if parsed.rebuild:
         build_opts["rebuild"] = True
 
-    result = doc.build(build_opts)
-    sys.stdout.write(f"{json.dumps(result, indent=2)}\n")
+    result = target.build(build_opts)
+    res_dict = result.__dict__ if hasattr(result, "__dict__") else result
+    sys.stdout.write(f"{json.dumps(res_dict, indent=2)}\n")
 
 
 def run_search(args):
@@ -84,13 +97,13 @@ def run_search(args):
     parsed = parser.parse_args(args)
 
     embeddings = parse_common_embedding(vars(parsed))
-    doc = Document(parsed.file, {"embeddings": embeddings})
+    target = resolve_target(parsed.file, {"embeddings": embeddings})
 
     search_opts = {}
     if parsed.top_k is not None:
         search_opts["topK"] = parsed.top_k
 
-    results = doc.search(parsed.query, search_opts)
+    results = target.search(parsed.query, search_opts)
     serialized = [r.model_dump(by_alias=True) for r in results]
     sys.stdout.write(f"{json.dumps(serialized, indent=2)}\n")
 
@@ -113,19 +126,19 @@ def run_ask(args):
     embeddings = parse_common_embedding(vars(parsed))
     llm = parse_llm(vars(parsed))
 
-    doc = Document(parsed.file, {"embeddings": embeddings, "llm": llm})
+    target = resolve_target(parsed.file, {"embeddings": embeddings, "llm": llm})
 
     opts = {}
     if parsed.top_k is not None:
         opts["topK"] = parsed.top_k
 
     if parsed.stream:
-        for chunk in doc.ask_stream(parsed.question, opts):
+        for chunk in target.ask_stream(parsed.question, opts):
             sys.stdout.write(chunk)
             sys.stdout.flush()
         sys.stdout.write("\n")
     else:
-        answer = doc.ask(parsed.question, opts)
+        answer = target.ask(parsed.question, opts)
         sys.stdout.write(f"{answer.text}\n")
 
 
@@ -147,11 +160,11 @@ def run_serve(args):
     embeddings = parse_common_embedding(vars(parsed))
     llm = parse_llm(vars(parsed))
 
-    doc = Document(
+    target = resolve_target(
         parsed.file,
         {"embeddings": embeddings, **({"llm": llm} if llm else {})},
     )
-    doc.build()
+    target.build()
 
     serve_opts = {}
     if llm:
@@ -163,16 +176,20 @@ def run_serve(args):
     if parsed.token:
         serve_opts["bearerToken"] = parsed.token
 
-    handle = doc.serve(serve_opts)
-    sys.stdout.write(f"RagLite listening on {handle.url}\n")
-    sys.stdout.flush()
+    if hasattr(target, "serve"):
+        target.serve(**serve_opts)
+    else:
+        from .api.server import create_server
+        handle = create_server(target, serve_opts)
+        sys.stdout.write(f"RagLite listening on {handle.url}\n")
+        sys.stdout.flush()
 
-    try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        handle.close()
-        sys.exit(0)
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            handle.close()
+            sys.exit(0)
 
 
 def main():

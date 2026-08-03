@@ -5,7 +5,7 @@ try:
     PACKAGE_VERSION = importlib.metadata.version("raglite-toolkit")
 except importlib.metadata.PackageNotFoundError:
     PACKAGE_NAME = "raglite-toolkit"
-    PACKAGE_VERSION = "1.0.2"  # local development fallback
+    PACKAGE_VERSION = "1.2.0"  # local development fallback
 
 
 SUPPORTED_EXTENSIONS = {".pdf", ".txt", ".json", ".md", ".markdown", ".docx"}

@@ -30,6 +30,8 @@ class Logger:
             suffix = " " + " ".join(map(str, args)) if args else ""
             print(f"[raglite] {message}{suffix}", file=sys.stderr)
 
+    warning = warn
+
     def error(self, message: str, *args: Any) -> None:
         if self.level != "silent":
             suffix = " " + " ".join(map(str, args)) if args else ""

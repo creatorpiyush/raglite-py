@@ -8,10 +8,10 @@ from ..constants import PACKAGE_VERSION
 from ..embeddings import Embedder, create_embedder
 from ..errors import FileNotIndexedError, LoaderError, RagLiteError
 from ..llm import generate_answer, stream_answer
-from ..loaders import get_loader
+from ..loaders import get_loader, is_url
 from ..retrieval import Retriever
 from ..types import AnswerResult, ChunkMetadata, IndexMetadata, StoredChunk
-from ..utils.hash import hash_file, namespace_from_path
+from ..utils.hash import hash_file, hash_string, namespace_from_path
 from ..utils.logger import create_logger
 from ..vectordb import MemoryVectorStore, VectorStore, create_vector_store
 
@@ -22,7 +22,7 @@ class Document:
         file_path: str,
         options: Optional[Union[DocumentOptions, Dict[str, Any]]] = None,
     ):
-        self.file_path = os.path.abspath(file_path)
+        self.file_path = file_path if is_url(file_path) else os.path.abspath(file_path)
         self.config: ResolvedConfig = resolve_config(options)
         self.logger = create_logger(self.config.logLevel)
         self.namespace = namespace_from_path(self.file_path)
@@ -79,7 +79,11 @@ class Document:
 
         self.store.load()
         existing = self.store.read_index_metadata()
-        source_hash = hash_file(self.file_path)
+        source_hash = (
+            hash_string(self.file_path)
+            if is_url(self.file_path)
+            else hash_file(self.file_path)
+        )
 
         if (
             not should_rebuild
@@ -127,7 +131,11 @@ class Document:
                 f"Embedder returned {len(vectors)} vectors for {len(chunks)} chunks"
             )
 
-        source = os.path.basename(self.file_path)
+        source = (
+            self.file_path
+            if is_url(self.file_path)
+            else os.path.basename(self.file_path)
+        )
         stored_chunks = []
         for index, text_chunk in enumerate(chunks):
             metadata = ChunkMetadata(
