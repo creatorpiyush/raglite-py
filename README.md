@@ -126,7 +126,7 @@ print()
 
 ## Pluggable Vector Databases
 
-`raglite` supports pluggable vector stores (Memory, Qdrant, Pinecone, LanceDB, or custom subclasses):
+`raglite` supports pluggable vector stores (Memory, Qdrant, Pinecone, or custom subclasses; LanceDB is currently TypeScript-only):
 
 ### Memory Store (Default)
 ```python
@@ -290,7 +290,7 @@ Document("./policy.pdf", {
 
 ## How Caching Works
 
-Every `build()` call fingerprints the source file with a **SHA-256 content hash** and persists it alongside the vectors. The cached index is reused only if **all** of the following match the stored index:
+Every `build()` call fingerprints the source (file bytes, or the fetched text for URLs) with a **SHA-256 content hash** and persists it alongside the vectors. The cached index is reused only if **all** of the following match the stored index:
 
 | Factor | Triggers rebuild if changed |
 |--------|-----------------------------|
@@ -298,7 +298,7 @@ Every `build()` call fingerprints the source file with a **SHA-256 content hash*
 | Chunk size | `chunkSize` changed |
 | Overlap | `overlap` changed |
 | Embedding provider/model | Provider or model string changed |
-| Library version | Package version bumped |
+| Index format | Stored index layout changed by a release (rare; ordinary upgrades reuse the index) |
 
 Pass `rebuild=True` to `build()` to force a fresh index regardless.
 
@@ -314,7 +314,7 @@ Each document is stored under `.raglite/<sha256-prefix>/`, so multiple documents
 from raglite.vectordb.base import VectorStore
 
 class MyVectorStore(VectorStore):
-    # Implement: load, reset, add, search, count,
+    # Implement: namespace (property), load, reset, add, search, count,
     #            save_index_metadata, read_index_metadata
     ...
 ```

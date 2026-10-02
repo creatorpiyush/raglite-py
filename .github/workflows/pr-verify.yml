@@ -34,3 +34,12 @@ jobs:
 
       - name: Run tests
         run: python -m pytest tests/ -q
+
+      - name: Check out TypeScript SDK for shared fixtures
+        uses: actions/checkout@v4
+        with:
+          repository: creatorpiyush/raglite
+          path: .ts-sdk
+
+      - name: Check shared fixtures match the TypeScript SDK
+        run: python scripts/sync_shared_fixtures.py --check --source .ts-sdk

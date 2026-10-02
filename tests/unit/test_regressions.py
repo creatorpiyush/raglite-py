@@ -1,6 +1,7 @@
 """
 Regression tests for URL indexing and shared vector stores across documents.
 """
+import json
 import shutil
 import tempfile
 from pathlib import Path
@@ -8,6 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
+from raglite.constants import INDEX_FORMAT_VERSION
 from raglite.core.collection import DocumentCollection
 from raglite.core.document import Document
 from raglite.embeddings.local import LocalEmbedder
@@ -208,3 +210,45 @@ def test_collection_search_raises_when_every_document_fails(tmp_dir, embedder_co
     ):
         with pytest.raises(RuntimeError, match="bad api key"):
             collection.search("refund")
+
+
+def _build_then_edit(tmp_dir, edit):
+    path = Path(tmp_dir) / "policy.txt"
+    path.write_text("Refunds are issued within 30 days.", encoding="utf-8")
+    opts = {"storeDir": str(Path(tmp_dir) / ".raglite"), "logLevel": "silent"}
+    doc = Document(str(path), opts)
+    doc.build()
+    meta_path = Path(tmp_dir) / ".raglite" / doc.store_namespace / "metadata.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert meta["formatVersion"] == INDEX_FORMAT_VERSION
+    edit(meta)
+    meta_path.write_text(json.dumps(meta), encoding="utf-8")
+    return Document(str(path), opts).build()
+
+
+def test_index_reused_across_package_versions(tmp_dir, embedder_configs):
+    result = _build_then_edit(tmp_dir, lambda m: m.update(version="9.9.9"))
+    assert result["cached"] is True
+
+
+def test_index_from_1_2_1_without_format_version_is_reused(tmp_dir, embedder_configs):
+    def edit(m):
+        m["version"] = "1.2.1"
+        m.pop("formatVersion")
+
+    assert _build_then_edit(tmp_dir, edit)["cached"] is True
+
+
+def test_older_index_without_format_version_is_rebuilt(tmp_dir, embedder_configs):
+    def edit(m):
+        m["version"] = "1.2.0"
+        m.pop("formatVersion")
+
+    assert _build_then_edit(tmp_dir, edit)["cached"] is False
+
+
+def test_index_with_other_format_version_is_rebuilt(tmp_dir, embedder_configs):
+    result = _build_then_edit(
+        tmp_dir, lambda m: m.update(formatVersion=INDEX_FORMAT_VERSION + 1)
+    )
+    assert result["cached"] is False

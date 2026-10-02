@@ -96,7 +96,9 @@ class AnswerResult(BaseModel):
 class IndexMetadata(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="allow")
 
-    version: str
+    version: str  # package version that built the index (informational)
+    # Index layout version; see INDEX_FORMAT_VERSION. None on indexes built before 1.2.2.
+    formatVersion: Optional[int] = Field(default=None, alias="formatVersion")
     source: str
     sourceHash: str = Field(..., alias="sourceHash")
     chunkSize: int = Field(..., alias="chunkSize")
