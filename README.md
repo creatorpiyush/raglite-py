@@ -136,6 +136,7 @@ doc = Document("./policy.pdf", {
 ```
 
 ### Qdrant Store
+By default each document gets its own collection (`raglite_<namespace>`). Set `indexName` to keep several documents in one shared collection; each document's points are tagged with its namespace, so rebuilding one document never affects the others.
 ```python
 doc = Document("./policy.pdf", {
     "vectorStore": {

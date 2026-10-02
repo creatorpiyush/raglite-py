@@ -1,6 +1,7 @@
 import html
 import re
 
+from ..constants import PACKAGE_VERSION
 from ..errors import LoaderError
 from .base import BaseLoader
 
@@ -18,7 +19,7 @@ class WebLoader(BaseLoader):
             import httpx
 
             headers = {
-                "User-Agent": "RAGLite/1.2.0 (Python/3.10+)",
+                "User-Agent": f"RAGLite/{PACKAGE_VERSION} (Python/3.10+)",
                 "Accept": "text/html,text/plain,application/xhtml+xml;q=0.9,*/*;q=0.8",
             }
             response = httpx.get(self.url, headers=headers, follow_redirects=True, timeout=15.0)

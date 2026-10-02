@@ -10,7 +10,13 @@ from ..errors import FileNotIndexedError, LoaderError, RagLiteError
 from ..llm import generate_answer, stream_answer
 from ..loaders import get_loader, is_url
 from ..retrieval import Retriever
-from ..types import AnswerResult, ChunkMetadata, IndexMetadata, StoredChunk
+from ..types import (
+    AnswerResult,
+    ChunkMetadata,
+    EmbeddingProviderConfig,
+    IndexMetadata,
+    StoredChunk,
+)
 from ..utils.hash import hash_file, hash_string, namespace_from_path
 from ..utils.logger import create_logger
 from ..vectordb import MemoryVectorStore, VectorStore, create_vector_store
@@ -74,16 +80,17 @@ class Document:
         if should_rebuild is None:
             should_rebuild = opts.get("rebuild", False)
 
-        if not os.path.exists(self.file_path):
+        if not is_url(self.file_path) and not os.path.exists(self.file_path):
             raise LoaderError(f"File does not exist: {self.file_path}")
 
         self.store.load()
         existing = self.store.read_index_metadata()
-        source_hash = (
-            hash_string(self.file_path)
-            if is_url(self.file_path)
-            else hash_file(self.file_path)
-        )
+        # Web pages change without their URL changing, so fingerprint the
+        # fetched content rather than the URL.
+        text: Optional[str] = None
+        if is_url(self.file_path):
+            text = get_loader(self.file_path).load()
+        source_hash = hash_string(text) if text is not None else hash_file(self.file_path)
 
         if (
             not should_rebuild
@@ -110,8 +117,8 @@ class Document:
         self.store.reset()
         self.store.load()
 
-        loader = get_loader(self.file_path)
-        text = loader.load()
+        if text is None:
+            text = get_loader(self.file_path).load()
         if not text:
             raise LoaderError(
                 f"Loader returned empty text for {self.file_path}"
@@ -340,19 +347,10 @@ class Document:
                 f'No RagLite index found for "{self.file_path}". Call build() first.'
             )
 
-        embed_config = self.config.embeddings
-        if embed_config.model is None:
-            from ..types import EmbeddingProviderConfig
-
-            embed_config = EmbeddingProviderConfig(
-                provider=embed_config.provider,
-                model=existing.embeddingModel,
-                apiKey=embed_config.apiKey,
-                baseURL=embed_config.baseURL,
-            )
-
         if self.embedder is None:
-            self.embedder = create_embedder(embed_config)
+            self.embedder = create_embedder(
+                _query_embeddings_config(existing, self.config.embeddings)
+            )
         self.ready = True
 
     def _cache_still_valid(
@@ -378,3 +376,19 @@ class Document:
         if req_model is not None and req_model != existing.embeddingModel:
             return False
         return True
+
+
+def _query_embeddings_config(
+    existing: IndexMetadata, configured: EmbeddingProviderConfig
+) -> EmbeddingProviderConfig:
+    """Queries must be embedded with the same provider and model as the index,
+    which may differ from the constructor default when ``build(embeddings=...)``
+    overrode it. Credentials from the configured provider are reused when it
+    matches; otherwise the provider falls back to its environment variables."""
+    same_provider = configured.provider == existing.embeddingProvider
+    return EmbeddingProviderConfig(
+        provider=existing.embeddingProvider,
+        model=existing.embeddingModel,
+        apiKey=configured.apiKey if same_provider else None,
+        baseURL=configured.baseURL if same_provider else None,
+    )

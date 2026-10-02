@@ -10,6 +10,7 @@ from .constants import (
     DEFAULT_TOP_K,
 )
 from .types import EmbeddingProviderConfig, LLMProviderConfig, VectorStoreProviderConfig
+from .vectordb.base import VectorStore
 
 
 class DocumentOptions(BaseModel):
@@ -44,6 +45,10 @@ def resolve_config(options: Optional[Union[DocumentOptions, Dict[str, Any]]] = N
     if options is None:
         opts = DocumentOptions()
     elif isinstance(options, dict):
+        # A VectorStore instance is read straight from the raw options by
+        # Document, so keep it out of the provider-config validation.
+        if isinstance(options.get("vectorStore"), VectorStore):
+            options = {k: v for k, v in options.items() if k != "vectorStore"}
         opts = DocumentOptions.model_validate(options)
     else:
         opts = options

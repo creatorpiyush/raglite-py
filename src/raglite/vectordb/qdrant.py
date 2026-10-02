@@ -31,11 +31,21 @@ class QdrantVectorStore(VectorStore):
         self._url = url.rstrip("/")
         self._api_key = api_key
         self._collection = collection_name or f"raglite_{namespace}"
+        # With an explicit collection name, several namespaces may share one
+        # collection, so every operation is scoped to this namespace instead
+        # of touching the whole collection.
+        self._shared = collection_name is not None
+        self._metadata_id = (
+            _uuid_from_str(f"{namespace}__metadata__") if self._shared else _METADATA_UUID
+        )
         self._count_cache: int = 0
 
     @property
     def namespace(self) -> str:
         return self._namespace
+
+    def _namespace_filter(self) -> dict:
+        return {"must": [{"key": "namespace", "match": {"value": self._namespace}}]}
 
     def _headers(self) -> dict:
         h: dict = {"Content-Type": "application/json"}
@@ -70,7 +80,14 @@ class QdrantVectorStore(VectorStore):
 
     def reset(self) -> None:
         try:
-            self._request("DELETE", f"/collections/{self._collection}")
+            if self._shared:
+                self._request(
+                    "POST",
+                    f"/collections/{self._collection}/points/delete?wait=true",
+                    {"filter": self._namespace_filter()},
+                )
+            else:
+                self._request("DELETE", f"/collections/{self._collection}")
         except VectorDBError:
             pass
         self._count_cache = 0
@@ -85,6 +102,7 @@ class QdrantVectorStore(VectorStore):
                 "vector": c.embedding,
                 "payload": {
                     "id": c.id,
+                    "namespace": self._namespace,
                     "text": c.text,
                     "metadata": c.metadata.model_dump(by_alias=True),
                     "isMetadata": False,
@@ -96,15 +114,18 @@ class QdrantVectorStore(VectorStore):
         self._count_cache += len(chunks)
 
     def search(self, embedding: List[float], top_k: int) -> List[VectorSearchHit]:
+        body: dict = {
+            "vector": embedding,
+            "limit": top_k + 1,
+            "with_payload": True,
+        }
+        if self._shared:
+            body["filter"] = self._namespace_filter()
         try:
             data = self._request(
                 "POST",
                 f"/collections/{self._collection}/points/search",
-                {
-                    "vector": embedding,
-                    "limit": top_k + 1,
-                    "with_payload": True,
-                },
+                body,
             )
         except VectorDBError:
             return []
@@ -112,7 +133,7 @@ class QdrantVectorStore(VectorStore):
         hits: List[VectorSearchHit] = []
         for r in data.get("result", []):
             payload = r.get("payload", {}) or {}
-            if r.get("id") == _METADATA_UUID or payload.get("isMetadata"):
+            if r.get("id") == self._metadata_id or payload.get("isMetadata"):
                 continue
             raw_meta = payload.get("metadata") or {}
             metadata = ChunkMetadata(
@@ -141,13 +162,14 @@ class QdrantVectorStore(VectorStore):
         zero_vec = [0.0] * dim
         payload_data = metadata.model_dump(by_alias=True)
         payload_data["isMetadata"] = True
+        payload_data["namespace"] = self._namespace
         self._request(
             "PUT",
             f"/collections/{self._collection}/points",
             {
                 "points": [
                     {
-                        "id": _METADATA_UUID,
+                        "id": self._metadata_id,
                         "vector": zero_vec,
                         "payload": payload_data,
                     }
@@ -161,7 +183,7 @@ class QdrantVectorStore(VectorStore):
             data = self._request(
                 "POST",
                 f"/collections/{self._collection}/points",
-                {"ids": [_METADATA_UUID], "with_payload": True},
+                {"ids": [self._metadata_id], "with_payload": True},
             )
         except VectorDBError:
             return None
