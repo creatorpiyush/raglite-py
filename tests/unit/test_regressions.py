@@ -252,3 +252,133 @@ def test_index_with_other_format_version_is_rebuilt(tmp_dir, embedder_configs):
         tmp_dir, lambda m: m.update(formatVersion=INDEX_FORMAT_VERSION + 1)
     )
     assert result["cached"] is False
+
+
+def test_qdrant_lists_chunks_across_scroll_pages():
+    pages = [
+        {
+            "points": [
+                {"id": "u3", "payload": {"id": "ns_000003", "text": "three", "metadata": {"source": "a", "chunk": 3, "totalChunks": 3}}},
+                {"id": "m", "payload": {"isMetadata": True}},
+            ],
+            "next_page_offset": "p2",
+        },
+        {
+            "points": [
+                {"id": "u1", "payload": {"id": "ns_000001", "text": "one", "metadata": {"source": "a", "chunk": 1, "totalChunks": 3}}},
+            ],
+            "next_page_offset": None,
+        },
+    ]
+    bodies = []
+
+    def fake_request(self, method, path, body=None):
+        assert path == "/collections/shared/points/scroll"
+        bodies.append(body)
+        return {"result": pages[len(bodies) - 1]}
+
+    with patch.object(QdrantVectorStore, "_request", fake_request):
+        store = QdrantVectorStore("http://qdrant:6333", "ns", collection_name="shared")
+        chunks = store.list_chunks()
+
+    assert [c.id for c in chunks] == ["ns_000001", "ns_000003"]
+    assert bodies[0]["with_vector"] is False
+    assert bodies[0]["filter"]["must"][0]["match"]["value"] == "ns"
+    assert bodies[1]["offset"] == "p2"
+
+
+def test_cli_serve_passes_supported_arguments(tmp_dir):
+    from raglite import cli
+
+    (Path(tmp_dir) / "docs").mkdir()
+    (Path(tmp_dir) / "docs" / "a.txt").write_text("alpha", encoding="utf-8")
+    with patch.object(DocumentCollection, "build"), patch.object(
+        DocumentCollection, "serve"
+    ) as serve:
+        cli.run_serve(
+            [str(Path(tmp_dir) / "docs"), "--token", "t", "--port", "9000", "--mode", "hybrid"]
+        )
+    serve.assert_called_once_with(host="127.0.0.1", port=9000, bearer_token="t", llm=None)
+
+
+def _fake_local(texts):
+    return [unit_vec_384() for _ in texts]
+
+
+def test_build_reuses_existing_chunking_when_none_given(tmp_dir):
+    path = Path(tmp_dir) / "policy.txt"
+    path.write_text("one two three four five six seven eight nine ten", encoding="utf-8")
+    opts = {"storeDir": tmp_dir, "logLevel": "silent"}
+    with patch.object(LocalEmbedder, "embed_documents", side_effect=_fake_local):
+        first = Document(str(path), opts).build(chunk_size=4, overlap=1)
+        assert first["chunkCount"] == 3
+
+        plain = Document(str(path), opts).build()
+        assert plain["cached"] is True
+        assert plain["chunkCount"] == 3
+
+        assert DocumentCollection(str(path), opts).build().cachedDocuments == 1
+
+
+def test_build_rebuilds_when_chunking_given_explicitly(tmp_dir):
+    path = Path(tmp_dir) / "policy.txt"
+    path.write_text("one two three four five six seven eight nine ten", encoding="utf-8")
+    opts = {"storeDir": tmp_dir, "logLevel": "silent"}
+    with patch.object(LocalEmbedder, "embed_documents", side_effect=_fake_local):
+        Document(str(path), opts).build(chunk_size=4, overlap=1)
+        via_build = Document(str(path), opts).build(chunk_size=500)
+        assert via_build["cached"] is False
+        assert via_build["chunkCount"] == 1
+
+        Document(str(path), opts).build(chunk_size=4, overlap=1)
+        via_constructor = Document(str(path), {**opts, "chunkSize": 500}).build()
+        assert via_constructor["cached"] is False
+
+
+def test_build_keeps_existing_embedding_provider_when_none_configured(tmp_dir):
+    path = Path(tmp_dir) / "policy.txt"
+    path.write_text("Refunds are issued within 30 days.", encoding="utf-8")
+    opts = {"storeDir": tmp_dir, "logLevel": "silent"}
+    configs = []
+
+    class Fake:
+        dimensions = 384
+
+        def __init__(self, config):
+            self.provider = config.provider
+            self.model = config.model or "default-model"
+
+        def embed_documents(self, texts):
+            return [unit_vec_384() for _ in texts]
+
+    def create(config):
+        configs.append(config)
+        return Fake(config)
+
+    with patch("raglite.core.document.create_embedder", side_effect=create):
+        Document(
+            str(path),
+            {**opts, "embeddings": {"provider": "openai", "model": "text-embedding-3-small"}},
+        ).build()
+        configs.clear()
+
+        plain = Document(str(path), opts).build()
+        assert plain["cached"] is True
+        assert plain["embeddingProvider"] == "openai"
+        assert configs[0].provider == "openai"
+        assert configs[0].model == "text-embedding-3-small"
+
+        local = Document(str(path), {**opts, "embeddings": {"provider": "local"}}).build()
+        assert local["cached"] is False
+        assert local["embeddingProvider"] == "local"
+
+
+def test_build_accepts_embeddings_dict_in_options(tmp_dir):
+    path = Path(tmp_dir) / "policy.txt"
+    path.write_text("Refunds are issued within 30 days.", encoding="utf-8")
+    with patch.object(
+        LocalEmbedder, "embed_documents", side_effect=lambda texts: [unit_vec_384() for _ in texts]
+    ):
+        doc = Document(str(path), {"storeDir": tmp_dir, "logLevel": "silent"})
+        assert doc.build({"embeddings": {"provider": "local"}})["cached"] is False
+        assert doc.build({"embeddings": {"provider": "local"}})["cached"] is True

@@ -2,7 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
-## [1.2.2] - Unreleased
+## [1.3.0] - 2026-10-03
+
+### Added
+- **Hybrid search:** `search()`, `ask()` and `ask_stream()` accept `mode="vector" | "keyword" | "hybrid"` (or `{"mode": ...}` in the options dict; default `"vector"`), on `Document` and `DocumentCollection`. Keyword mode uses BM25; hybrid merges vector and keyword results with Reciprocal Rank Fusion, so exact terms such as `ERR_4021`, SKUs or function names are found even when embeddings miss them. Tune it with `hybrid={"rrfK", "candidates", "weights"}`, or set defaults with the new `retrieval` option. Results in these modes carry `scores` (`vector`, `keyword`, `fused`); vector-mode results are unchanged.
+- **Keyword index:** `build()` now also writes a BM25 index (`<storeDir>/<namespace>/keyword.json`) from the chunk texts. It needs no extra embedding calls, works with every vector store, and uses the same file layout as the TypeScript SDK.
+- **Multilingual keyword tokenizer (`raglite-v1`):** NFKC and lowercase normalisation, code identifiers kept whole (`gpt-4.1`, `snake_case`), and character bigrams for Chinese, Japanese, Korean, Thai, Lao, Khmer and Myanmar. Exported as `tokenize()`. It produces exactly the same terms as the TypeScript SDK.
+- **HTTP and CLI:** optional `mode` on `/search` and `/ask`; `--mode` on `raglite search`, `ask` and `serve`. `/info` reports `retrievalMode`.
+- **`VectorStore` extension points (optional):** `list_chunks()` lets keyword and hybrid search rebuild a missing keyword index from the store, and `keyword_search(query, top_k)` replaces the built-in BM25 index. The memory and Qdrant stores implement `list_chunks()`. Existing custom stores need no changes.
+
+### Changed
+- **Chunking of text without spaces:** Chinese, Japanese, Thai, Lao, Khmer and Myanmar text is now chunked by character instead of becoming one giant "word". Previously a document in these scripts became a single chunk of any length, which could exceed embedding model limits. `chunkSize` and `overlap` count characters for these scripts and words for everything else.
+
+### Fixed
+- **Custom chunk sizes are kept:** `build()` without `chunk_size` or `overlap` (in the call or the constructor) now reuses the existing index's values instead of the defaults. Previously `raglite search` or `raglite ask` after `raglite index --chunk-size N` silently re-embedded the whole index at the default 500 words. Defaults still apply to a new index, and explicit values still trigger a rebuild when they differ.
+- **Embedding provider is kept:** with no `embeddings` configured, `build()` now keeps the existing index's provider and model (reusing configured credentials when the provider matches) instead of switching to the local default. The CLI no longer assumes `--embed-provider local` when no `--embed-*` flag is given, so `raglite search` and `raglite ask` reuse an index built with `--embed-provider openai` instead of re-embedding it locally. New indexes still default to local embeddings.
+- **`build(options)` embeddings dict:** `build({"embeddings": {...}})` now accepts a plain dict, as the constructor does.
+- **`raglite serve`:** no longer crashes with `TypeError` when given `--llm-provider` or `--token`.
+- **`DocumentCollection.serve()`:** no longer fails with `ImportError`, so serving a directory works. It now also falls back to the collection's configured `llm`.
+- **`ask()` options:** an explicit `scoreThreshold` of `0` is no longer replaced by the configured default.
+
+### Upgrade notes
+- The index format version is now 2. Indexes whose source contains no Chinese, Japanese, Thai, Lao, Khmer or Myanmar text are upgraded in place on the next `build()`, without re-embedding (the source file is read once to check). Indexes of sources that do contain such text are rebuilt once.
+- Indexes built before 1.3.0 have no keyword index. The memory and Qdrant stores build it from the stored chunks on the first keyword or hybrid search. Pinecone and custom stores without `list_chunks()` log a warning and use vector search until you run `build(rebuild=True)`.
+- With Qdrant or Pinecone, the keyword index lives on local disk under `storeDir`. Keep `storeDir` on persistent storage when you use keyword or hybrid search.
+
+## [1.2.2] - 2026-10-02
 
 ### Changed
 - **Upgrades keep cached indexes:** The build cache is now keyed on an index format version (`formatVersion` in `IndexMetadata`) instead of the package version, so upgrading RAGLite no longer re-embeds every index. Indexes built by 1.2.1 are reused as-is; indexes from older releases are rebuilt once.

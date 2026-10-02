@@ -1,6 +1,6 @@
-from typing import Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_serializer
 
 LLMProviderName = Literal[
     "openai",
@@ -73,14 +73,72 @@ class StoredChunk(BaseModel):
     metadata: ChunkMetadata
 
 
+RetrievalMode = Literal["vector", "keyword", "hybrid"]
+"""``vector``: embedding similarity only (the default). ``keyword``: BM25 over
+chunk texts only; good for exact terms such as error codes or SKUs.
+``hybrid``: both, merged with Reciprocal Rank Fusion."""
+
+
+class HybridWeights(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    vector: Optional[float] = None
+    keyword: Optional[float] = None
+
+
+class HybridOptions(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    # RRF constant; larger values flatten the difference between ranks (default 60).
+    rrfK: Optional[float] = Field(
+        default=None, validation_alias=AliasChoices("rrfK", "rrf_k"), serialization_alias="rrfK"
+    )
+    # Results taken from each retriever before fusion (default max(50, top_k * 4)).
+    candidates: Optional[int] = None
+    # Relative weight of each retriever in hybrid mode (default 1 each).
+    weights: Optional[HybridWeights] = None
+
+
+class RetrievalOptions(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    mode: Optional[RetrievalMode] = None
+    hybrid: Optional[HybridOptions] = None
+
+
+class SearchScores(BaseModel):
+    """Per-retriever scores of a hybrid or keyword search result."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    vector: Optional[float] = None  # cosine similarity, when in the vector results
+    keyword: Optional[float] = None  # BM25 score, when in the keyword results
+    fused: Optional[float] = None  # raw RRF score; ``score`` is this normalised to [0, 1]
+
+    @model_serializer(mode="wrap")
+    def _drop_missing(self, handler: Any) -> Dict[str, Any]:
+        return {k: v for k, v in handler(self).items() if v is not None}
+
+
 class SearchResult(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="allow")
 
     id: str
     text: str
     metadata: ChunkMetadata
+    # Cosine similarity in vector mode; normalised fused rank score in keyword and hybrid modes.
     score: float
     distance: float
+    # Set in keyword and hybrid modes.
+    scores: Optional[SearchScores] = None
+
+    @model_serializer(mode="wrap")
+    def _drop_missing_scores(self, handler: Any) -> Dict[str, Any]:
+        # Keeps vector-mode output identical to earlier releases.
+        data = handler(self)
+        if data.get("scores") is None:
+            data.pop("scores", None)
+        return data
 
 
 class AnswerResult(BaseModel):

@@ -1,25 +1,51 @@
 import os
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, Generator, Optional, Union
+from typing import Any, Dict, Generator, List, Optional, Union
 
 from ..chunking import RecursiveChunker
 from ..config import DocumentOptions, ResolvedConfig, resolve_config
-from ..constants import INDEX_FORMAT_VERSION, LEGACY_FORMAT_1_VERSIONS, PACKAGE_VERSION
+from ..constants import (
+    DEFAULT_STORE_DIRNAME,
+    INDEX_FORMAT_VERSION,
+    LEGACY_FORMAT_1_VERSIONS,
+    PACKAGE_VERSION,
+)
 from ..embeddings import Embedder, create_embedder
 from ..errors import FileNotIndexedError, LoaderError, RagLiteError
 from ..llm import generate_answer, stream_answer
 from ..loaders import get_loader, is_url
 from ..retrieval import Retriever
+from ..retrieval.fusion import RankedList, reciprocal_rank_fusion
+from ..retrieval.keyword_index import (
+    KeywordHit,
+    KeywordIndex,
+    keyword_file_matches,
+    read_keyword_file,
+    write_keyword_file,
+)
+from ..retrieval.plan import RetrievalPlan, resolve_retrieval_plan
+from ..text.scripts import has_unspaced_text
 from ..types import (
     AnswerResult,
     ChunkMetadata,
     EmbeddingProviderConfig,
     IndexMetadata,
+    SearchResult,
     StoredChunk,
 )
 from ..utils.hash import hash_file, hash_string, namespace_from_path
 from ..utils.logger import create_logger
 from ..vectordb import MemoryVectorStore, VectorStore, create_vector_store
+
+
+@dataclass
+class RetrievalCandidates:
+    """Candidate lists of one document, before fusion (internal)."""
+
+    vector: List[SearchResult]
+    # None when the document has no keyword index (a warning has been logged).
+    keyword: Optional[List[KeywordHit]]
 
 
 class Document:
@@ -44,8 +70,27 @@ class Document:
         else:
             self.store = MemoryVectorStore(self.config.storeDir, self.namespace)
 
+        # Sidecar file holding the BM25 keyword index; see retrieval/keyword_index.py.
+        base_dir = (
+            self.config.storeDir
+            if isinstance(raw_store, VectorStore)
+            else _keyword_base_dir(self.config)
+        )
+        self.keyword_path = os.path.join(base_dir, self.namespace, "keyword.json")
+
+        # Chunking the caller set in the constructor; unset values follow the existing index.
+        self._chunking = _explicit_chunking(options)
+        # Embeddings the caller set in the constructor; if unset, an existing index keeps its own.
+        self._explicit_embeddings = (
+            options.embeddings is not None
+            if isinstance(options, DocumentOptions)
+            else isinstance(options, dict) and options.get("embeddings") is not None
+        )
+
         self.embedder: Optional[Embedder] = None
         self.ready = False
+        self._keyword_index: Optional[KeywordIndex] = None
+        self._keyword_unavailable_warned = False
 
     def build(
         self,
@@ -64,17 +109,21 @@ class Document:
         if c_size is None:
             c_size = opts.get("chunk_size")
         if c_size is None:
-            c_size = self.config.chunkSize
+            c_size = self._chunking["chunkSize"]
 
         c_overlap = overlap
         if c_overlap is None:
             c_overlap = opts.get("overlap")
         if c_overlap is None:
-            c_overlap = self.config.overlap
+            c_overlap = self._chunking["overlap"]
 
         embed_config = embeddings
         if embed_config is None:
-            embed_config = opts.get("embeddings") or self.config.embeddings
+            embed_config = opts.get("embeddings")
+        if embed_config is None and self._explicit_embeddings:
+            embed_config = self.config.embeddings
+        if isinstance(embed_config, dict):
+            embed_config = EmbeddingProviderConfig.model_validate(embed_config)
 
         should_rebuild = rebuild
         if should_rebuild is None:
@@ -85,6 +134,21 @@ class Document:
 
         self.store.load()
         existing = self.store.read_index_metadata()
+        # Chunking nobody asked for keeps the existing index's values, so a
+        # plain build() (for example from `raglite search`) does not re-embed
+        # an index that was built with a custom chunk size.
+        if c_size is None:
+            c_size = existing.chunkSize if existing is not None else self.config.chunkSize
+        if c_overlap is None:
+            c_overlap = existing.overlap if existing is not None else self.config.overlap
+        # Likewise an unconfigured embedding provider keeps the existing
+        # index's provider and model rather than switching it to the local default.
+        if embed_config is None:
+            embed_config = (
+                _query_embeddings_config(existing, self.config.embeddings)
+                if existing is not None
+                else self.config.embeddings
+            )
         # Web pages change without their URL changing, so fingerprint the
         # fetched content rather than the URL.
         text: Optional[str] = None
@@ -92,13 +156,23 @@ class Document:
             text = get_loader(self.file_path).load()
         source_hash = hash_string(text) if text is not None else hash_file(self.file_path)
 
-        if (
+        reusable = (
             not should_rebuild
-            and existing
-            and self._cache_still_valid(
-                existing, source_hash, c_size, c_overlap, embed_config
-            )
-        ):
+            and existing is not None
+            and self._cache_key_matches(existing, source_hash, c_size, c_overlap, embed_config)
+        )
+        if reusable and index_format_version(existing) != INDEX_FORMAT_VERSION:
+            # Format 2 only changed how unspaced scripts are chunked, so a
+            # format-1 index of a source without such text is still exact:
+            # upgrade it in place instead of paying to re-embed it.
+            if text is None:
+                text = get_loader(self.file_path).load()
+            reusable = index_format_version(existing) == 1 and not has_unspaced_text(text)
+            if reusable:
+                existing = existing.model_copy(update={"formatVersion": INDEX_FORMAT_VERSION})
+                self.store.save_index_metadata(existing)
+
+        if reusable and existing is not None:
             self.logger.info(
                 f"Reusing cached index ({existing.chunkCount} chunks)."
             )
@@ -114,6 +188,7 @@ class Document:
             }
 
         self.logger.info("Building new index...")
+        self._keyword_index = None
         self.store.reset()
         self.store.load()
 
@@ -180,6 +255,7 @@ class Document:
             createdAt=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         )
         self.store.save_index_metadata(metadata)
+        self._save_keyword_index(KeywordIndex.build(stored_chunks), metadata)
 
         self.embedder = embedder
         self.ready = True
@@ -200,8 +276,34 @@ class Document:
         *,
         top_k: Optional[int] = None,
         score_threshold: Optional[float] = None,
-    ) -> list:
-        self._ensure_ready()
+        mode: Optional[str] = None,
+        hybrid: Optional[Any] = None,
+    ) -> List[SearchResult]:
+        """Search the indexed document. ``mode`` picks vector (default),
+        keyword or hybrid retrieval."""
+        plan = self.retrieval_plan(
+            options, top_k=top_k, score_threshold=score_threshold, mode=mode, hybrid=hybrid
+        )
+        if plan.mode == "vector":
+            self._ensure_ready()
+            return self._vector_search(query, plan.top_k, plan.score_threshold)
+        candidates = self.retrieve_candidates(query, plan)
+        if candidates.keyword is None:
+            return candidates.vector[: plan.top_k]
+        return reciprocal_rank_fusion(
+            fusion_lists(plan, candidates.vector, candidates.keyword), plan.rrf_k, plan.top_k
+        )
+
+    def retrieval_plan(
+        self,
+        options: Optional[Dict[str, Any]] = None,
+        *,
+        top_k: Optional[int] = None,
+        score_threshold: Optional[float] = None,
+        mode: Optional[str] = None,
+        hybrid: Optional[Any] = None,
+    ) -> RetrievalPlan:
+        """Resolve search options against this document's defaults (internal)."""
         opts = options or {}
 
         tk = top_k
@@ -220,8 +322,32 @@ class Document:
         if st is None:
             st = self.config.scoreThreshold
 
-        retriever = Retriever(self.embedder, self.store)
-        return retriever.retrieve(query, top_k=tk, score_threshold=st)
+        return resolve_retrieval_plan(
+            self.config.retrieval,
+            mode if mode is not None else opts.get("mode"),
+            hybrid if hybrid is not None else opts.get("hybrid"),
+            tk,
+            st,
+        )
+
+    def retrieve_candidates(self, query: str, plan: RetrievalPlan) -> RetrievalCandidates:
+        """The vector and keyword candidate lists for a keyword or hybrid search,
+        before fusion (internal). DocumentCollection fuses these across
+        documents. Without a keyword index the vector list is returned for
+        every mode, so the caller can fall back to vector search."""
+        self._ensure_ready()
+        keyword = self._keyword_search(query, plan.candidates)
+        need_vector = keyword is None or (plan.mode == "hybrid" and plan.vector_weight > 0)
+        vector = (
+            self._vector_search(
+                query,
+                plan.top_k if keyword is None else plan.candidates,
+                plan.score_threshold,
+            )
+            if need_vector
+            else []
+        )
+        return RetrievalCandidates(vector=vector, keyword=keyword)
 
     def ask(
         self, question: str, options: Optional[Dict[str, Any]] = None
@@ -233,14 +359,7 @@ class Document:
                 "No LLM provider configured. Pass one to `ask({ llm: ... })` or `new Document(path, { llm: ... })`."
             )
 
-        tk = opts.get("topK") or opts.get("top_k") or self.config.topK
-        st = (
-            opts.get("scoreThreshold")
-            or opts.get("score_threshold")
-            or self.config.scoreThreshold
-        )
-
-        context = self.search(question, top_k=tk, score_threshold=st)
+        context = self.search(question, search_options_of(opts))
 
         generate_opts = dict(opts)
         generate_opts["llm"] = llm_config
@@ -259,14 +378,7 @@ class Document:
                 "No LLM provider configured. Pass one to `ask_stream({ llm: ... })` or `new Document(path, { llm: ... })`."
             )
 
-        tk = opts.get("topK") or opts.get("top_k") or self.config.topK
-        st = (
-            opts.get("scoreThreshold")
-            or opts.get("score_threshold")
-            or self.config.scoreThreshold
-        )
-
-        context = self.search(question, top_k=tk, score_threshold=st)
+        context = self.search(question, search_options_of(opts))
 
         generate_opts = dict(opts)
         generate_opts["llm"] = llm_config
@@ -337,6 +449,64 @@ class Document:
             bearer_token=bearer_token,
         )
 
+    def _vector_search(self, query: str, top_k: int, score_threshold: float) -> List[SearchResult]:
+        retriever = Retriever(self.embedder, self.store)
+        return retriever.retrieve(query, top_k=top_k, score_threshold=score_threshold)
+
+    def _keyword_search(self, query: str, top_k: int) -> Optional[List[KeywordHit]]:
+        """BM25 (or the store's native) keyword search; None when no keyword index exists."""
+        native = self.store.keyword_search(query, top_k)
+        if native is not None:
+            return [
+                KeywordHit(id=h.id, text=h.text, metadata=h.metadata, score=h.score)
+                for h in native
+            ]
+        index = self._load_keyword_index()
+        return index.search(query, top_k) if index is not None else None
+
+    def _load_keyword_index(self) -> Optional[KeywordIndex]:
+        if self._keyword_index is not None:
+            return self._keyword_index
+        metadata = self.store.read_index_metadata()
+        if metadata is None:
+            return None
+
+        data = read_keyword_file(self.keyword_path)
+        if data is not None and keyword_file_matches(data, metadata):
+            try:
+                self._keyword_index = KeywordIndex.from_file(data)
+                return self._keyword_index
+            except Exception:
+                pass
+
+        # Indexes built before 1.3, or a sidecar left behind on another
+        # machine: rebuild from the stored chunk texts, which needs no
+        # embedding calls.
+        chunks = self.store.list_chunks()
+        if chunks is not None and len(chunks) == metadata.chunkCount:
+            self.logger.info(f"Building keyword index from {len(chunks)} stored chunk(s).")
+            index = KeywordIndex.build(chunks)
+            self._save_keyword_index(index, metadata)
+            return index
+
+        if not self._keyword_unavailable_warned:
+            self._keyword_unavailable_warned = True
+            self.logger.warn(
+                f'No keyword index for "{self.file_path}" (expected {self.keyword_path}); '
+                "using vector search. Run build(rebuild=True) to enable keyword and hybrid search."
+            )
+        return None
+
+    def _save_keyword_index(self, index: KeywordIndex, metadata: IndexMetadata) -> None:
+        self._keyword_index = index
+        try:
+            write_keyword_file(self.keyword_path, index.to_file(metadata))
+        except Exception as err:
+            # The vector index is already saved; keyword search still works in
+            # this process and will be rebuilt or reported the next time it is
+            # needed.
+            self.logger.warn(f"Could not save keyword index to {self.keyword_path}: {err}")
+
     def _ensure_ready(self) -> None:
         if self.ready and self.embedder is not None:
             return
@@ -354,7 +524,7 @@ class Document:
             )
         self.ready = True
 
-    def _cache_still_valid(
+    def _cache_key_matches(
         self,
         existing: IndexMetadata,
         source_hash: str,
@@ -362,8 +532,7 @@ class Document:
         overlap: int,
         embeddings_config: Any,
     ) -> bool:
-        if index_format_version(existing) != INDEX_FORMAT_VERSION:
-            return False
+        """Everything in the cache key except the index format, which build() checks separately."""
         if existing.sourceHash != source_hash:
             return False
         if existing.chunkSize != chunk_size:
@@ -400,3 +569,44 @@ def _query_embeddings_config(
         apiKey=configured.apiKey if same_provider else None,
         baseURL=configured.baseURL if same_provider else None,
     )
+
+
+def fusion_lists(
+    plan: RetrievalPlan, vector: List[SearchResult], keyword: List[KeywordHit]
+) -> List[RankedList]:
+    """The candidate lists to fuse for a keyword or hybrid plan."""
+    if plan.mode == "keyword":
+        return [RankedList("keyword", 1, keyword)]
+    return [
+        RankedList("vector", plan.vector_weight, vector),
+        RankedList("keyword", plan.keyword_weight, keyword),
+    ]
+
+
+_SEARCH_KEYS = ("topK", "top_k", "scoreThreshold", "score_threshold", "mode", "hybrid")
+
+
+def search_options_of(options: Dict[str, Any]) -> Dict[str, Any]:
+    """The retrieval-related subset of ask() options."""
+    return {k: options[k] for k in _SEARCH_KEYS if options.get(k) is not None}
+
+
+def _keyword_base_dir(config: ResolvedConfig) -> str:
+    """Where the keyword sidecar lives: next to the vector index for the
+    memory store (mirroring create_vector_store's default), otherwise under
+    ``storeDir``."""
+    vs = config.vectorStore
+    if vs is None:
+        return config.storeDir
+    if vs.store_dir:
+        return vs.store_dir
+    return DEFAULT_STORE_DIRNAME if vs.provider == "memory" else config.storeDir
+
+
+def _explicit_chunking(options: Any) -> Dict[str, Optional[int]]:
+    """chunkSize/overlap as given to the constructor, None where unset."""
+    if isinstance(options, DocumentOptions):
+        return {"chunkSize": options.chunkSize, "overlap": options.overlap}
+    opts = options if isinstance(options, dict) else {}
+    size = opts.get("chunkSize", opts.get("chunk_size"))
+    return {"chunkSize": size, "overlap": opts.get("overlap")}

@@ -5,7 +5,7 @@ from typing import List, Optional
 
 from ..errors import VectorDBError
 from ..types import IndexMetadata, StoredChunk
-from .base import VectorSearchHit, VectorStore
+from .base import IndexedChunk, VectorSearchHit, VectorStore
 
 
 class MemoryVectorStore(VectorStore):
@@ -71,6 +71,9 @@ class MemoryVectorStore(VectorStore):
 
     def count(self) -> int:
         return len(self.chunks)
+
+    def list_chunks(self) -> List[IndexedChunk]:
+        return [IndexedChunk(id=c.id, text=c.text, metadata=c.metadata) for c in self.chunks]
 
     def save_index_metadata(self, metadata: IndexMetadata) -> None:
         try:

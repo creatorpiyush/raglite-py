@@ -9,7 +9,12 @@ import pytest
 
 from raglite.chunking import RecursiveChunker
 from raglite.errors import ChunkingError
+from raglite.retrieval.fusion import RankedList, reciprocal_rank_fusion
+from raglite.retrieval.keyword_index import KeywordHit, KeywordIndex
+from raglite.text import tokenize
+from raglite.types import ChunkMetadata
 from raglite.utils.hash import hash_string, namespace_from_path
+from raglite.vectordb.base import IndexedChunk
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "shared"
 
@@ -20,6 +25,9 @@ def _load(name):
 
 CHUNKER = _load("chunker.json")
 HASH = _load("hash.json")
+TOKENIZER = _load("tokenizer.json")
+BM25 = _load("bm25.json")
+RRF = _load("rrf.json")
 
 
 @pytest.mark.parametrize("case", CHUNKER, ids=[c["name"] for c in CHUNKER])
@@ -40,3 +48,52 @@ def test_hash_string_matches_typescript(case):
 @pytest.mark.parametrize("case", HASH["namespaceFromPath"], ids=lambda c: c["input"])
 def test_namespace_matches_typescript(case):
     assert namespace_from_path(case["input"]) == case["namespace"]
+
+
+@pytest.mark.parametrize("case", TOKENIZER, ids=[c["name"] for c in TOKENIZER])
+def test_tokenizer_matches_typescript(case):
+    assert tokenize(case["text"]) == case["tokens"]
+
+
+@pytest.fixture(scope="module")
+def bm25_index():
+    chunks = BM25["chunks"]
+    return KeywordIndex.build(
+        [
+            IndexedChunk(
+                id=c["id"],
+                text=c["text"],
+                metadata=ChunkMetadata(source="corpus.txt", chunk=i + 1, totalChunks=len(chunks)),
+            )
+            for i, c in enumerate(chunks)
+        ]
+    )
+
+
+@pytest.mark.parametrize("case", BM25["queries"], ids=lambda c: repr(c["query"]))
+def test_bm25_matches_typescript(case, bm25_index):
+    actual = bm25_index.search(case["query"], case["topK"])
+    assert [h.id for h in actual] == [h["id"] for h in case["hits"]]
+    for got, want in zip(actual, case["hits"]):
+        assert got.score == pytest.approx(want["score"], abs=1e-6)
+
+
+def _ranked(name, spec):
+    hits = [
+        KeywordHit(id=h["id"], text=h["text"], metadata=ChunkMetadata(**h["metadata"]), score=h["score"])
+        for h in spec["hits"]
+    ]
+    return RankedList(name, spec["weight"], hits)
+
+
+@pytest.mark.parametrize("case", RRF, ids=[c["name"] for c in RRF])
+def test_rrf_matches_typescript(case):
+    actual = reciprocal_rank_fusion(
+        [_ranked("vector", case["vector"]), _ranked("keyword", case["keyword"])],
+        case["rrfK"],
+        case["topK"],
+    )
+    assert [r.id for r in actual] == [r["id"] for r in case["results"]]
+    for got, want in zip(actual, case["results"]):
+        assert got.score == pytest.approx(want["score"], abs=1e-9)
+        assert got.scores.model_dump() == pytest.approx(want["scores"], abs=1e-9)

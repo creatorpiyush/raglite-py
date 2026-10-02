@@ -1,16 +1,21 @@
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Generator, List, Optional, Union
+from typing import Any, Callable, Dict, Generator, List, Optional, TypeVar, Union
 
 from ..config import DocumentOptions, ResolvedConfig, resolve_config
 from ..errors import ConfigError, RagLiteError
 from ..llm import generate_answer, stream_answer
 from ..loaders import DirectoryLoader, is_supported_file, is_url
+from ..retrieval.fusion import reciprocal_rank_fusion
+from ..retrieval.keyword_index import KeywordHit
+from ..retrieval.plan import resolve_retrieval_plan
 from ..types import AnswerResult, SearchResult
 from ..utils.logger import Logger, create_logger
 from ..vectordb import VectorStore
-from .document import Document
+from .document import Document, fusion_lists, search_options_of
+
+T = TypeVar("T")
 
 
 @dataclass
@@ -146,33 +151,70 @@ class DocumentCollection:
         *,
         top_k: Optional[int] = None,
         score_threshold: Optional[float] = None,
+        mode: Optional[str] = None,
+        hybrid: Optional[Any] = None,
     ) -> List[SearchResult]:
-        """Semantic search across all documents in the collection."""
-        self._ensure_ready()
-        if not self.documents:
-            return []
-
+        """Search across all documents in the collection. ``mode`` picks vector
+        (default), keyword or hybrid retrieval."""
         opts = options or {}
         tk = top_k if top_k is not None else opts.get("topK", opts.get("top_k", self.config.topK))
         st = score_threshold if score_threshold is not None else opts.get("scoreThreshold", opts.get("score_threshold", self.config.scoreThreshold))
+        plan = resolve_retrieval_plan(
+            self.config.retrieval,
+            mode if mode is not None else opts.get("mode"),
+            hybrid if hybrid is not None else opts.get("hybrid"),
+            tk,
+            st,
+        )
 
-        all_hits: List[SearchResult] = []
+        self._ensure_ready()
+        if not self.documents:
+            return []
+        docs = list(self.documents.values())
+
+        if plan.mode == "vector":
+            per_doc = self._settle(
+                docs, lambda doc: doc.search(query, top_k=tk * 2, score_threshold=st, mode="vector")
+            )
+            all_hits = [hit for hits in per_doc for hit in hits]
+            all_hits.sort(key=lambda h: h.score, reverse=True)
+            return all_hits[:tk]
+
+        # BM25 statistics are per document, so fusing each document separately
+        # and then merging would compare unrelated fused ranks. Instead merge
+        # all vector lists (cosine scores are comparable) and all keyword
+        # lists, then fuse once.
+        candidates = self._settle(docs, lambda doc: doc.retrieve_candidates(query, plan))
+        vector = sorted(
+            (hit for c in candidates for hit in c.vector), key=lambda h: (-h.score, h.id)
+        )
+        keyword_lists = [c.keyword for c in candidates if c.keyword is not None]
+        if not keyword_lists:
+            return vector[:tk]
+        keyword: List[KeywordHit] = sorted(
+            (hit for hits in keyword_lists for hit in hits), key=lambda h: (-h.score, h.id)
+        )
+        return reciprocal_rank_fusion(
+            fusion_lists(plan, vector[: plan.candidates], keyword[: plan.candidates]),
+            plan.rrf_k,
+            tk,
+        )
+
+    def _settle(self, docs: List[Document], fn: Callable[[Document], T]) -> List[T]:
+        """Run ``fn`` on every document. One broken document should not hide
+        results from the others, but if every document failed the caller needs
+        the error, not an empty list."""
+        values: List[T] = []
         failures: List[Exception] = []
-        for doc in self.documents.values():
+        for doc in docs:
             try:
-                hits = doc.search(query, top_k=tk * 2, score_threshold=st)
-                all_hits.extend(hits)
+                values.append(fn(doc))
             except Exception as err:
                 failures.append(err)
                 self.logger.warning(f'Search failed for document "{doc.file_path}": {err}')
-
-        # One broken document should not hide results from the others, but if
-        # every document failed the caller needs the error, not an empty list.
-        if len(failures) == len(self.documents):
+        if len(failures) == len(docs):
             raise failures[0]
-
-        all_hits.sort(key=lambda h: h.score, reverse=True)
-        return all_hits[:tk]
+        return values
 
     def ask(self, question: str, options: Optional[Dict[str, Any]] = None) -> AnswerResult:
         """Ask a question across the entire collection."""
@@ -183,11 +225,7 @@ class DocumentCollection:
                 "No LLM provider configured. Pass one to `ask(options={'llm': ...})` or `DocumentCollection(..., options={'llm': ...})`."
             )
 
-        context = self.search(
-            question,
-            top_k=opts.get("topK", opts.get("top_k", self.config.topK)),
-            score_threshold=opts.get("scoreThreshold", opts.get("score_threshold", self.config.scoreThreshold)),
-        )
+        context = self.search(question, search_options_of(opts))
         if not context:
             raise RagLiteError("No relevant context found in document collection to answer question.")
 
@@ -208,11 +246,7 @@ class DocumentCollection:
                 "No LLM provider configured. Pass one to `ask_stream(options={'llm': ...})` or `DocumentCollection(..., options={'llm': ...})`."
             )
 
-        context = self.search(
-            question,
-            top_k=opts.get("topK", opts.get("top_k", self.config.topK)),
-            score_threshold=opts.get("scoreThreshold", opts.get("score_threshold", self.config.scoreThreshold)),
-        )
+        context = self.search(question, search_options_of(opts))
         if not context:
             raise RagLiteError("No relevant context found in document collection to answer question.")
 
@@ -234,16 +268,16 @@ class DocumentCollection:
         """Serve a FastAPI REST API server over the document collection."""
         import uvicorn
 
-        from ..api.server import create_app
+        from ..api.server import build_app
 
         self._ensure_ready()
         opts = {
             "host": host,
             "port": port,
             "bearer_token": bearer_token,
-            "llm": llm,
+            "llm": llm or self.config.llm,
         }
-        app = create_app(self, opts)
+        app = build_app(self, opts)
         uvicorn.run(app, host=host, port=port)
 
     def get_documents(self) -> List[Document]:

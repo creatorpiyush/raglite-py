@@ -103,6 +103,7 @@ def build_app(document: Any, options: Dict[str, Any]) -> FastAPI:
             "chunkSize": cfg.chunkSize,
             "overlap": cfg.overlap,
             "topK": cfg.topK,
+            "retrievalMode": cfg.retrieval.mode or "vector",
             "embeddings": {
                 "provider": cfg.embeddings.provider,
                 "model": cfg.embeddings.model
@@ -118,6 +119,7 @@ def build_app(document: Any, options: Dict[str, Any]) -> FastAPI:
             req.query,
             top_k=req.topK,
             score_threshold=req.scoreThreshold,
+            mode=req.mode,
         )
         return {
             "results": [r.model_dump(by_alias=True) for r in results]
@@ -133,6 +135,7 @@ def build_app(document: Any, options: Dict[str, Any]) -> FastAPI:
                 "llm": ask_provider,
                 "topK": req.topK,
                 "scoreThreshold": req.scoreThreshold,
+                "mode": req.mode,
                 "includeCitations": req.includeCitations,
             }
 

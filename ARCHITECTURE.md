@@ -128,17 +128,20 @@ graph TD
 2. Calculates SHA-256 hash of raw document content.
 3. Checks existing `IndexMetadata` in `VectorStore`. The cached index is reused when the index format version, content hash, chunk size, overlap and embedding provider/model all match (URL sources are hashed by their fetched text).
 4. If hash differs or force rebuild requested:
-   - `RecursiveChunker` splits text into word-based chunks (default 500 words, 50-word overlap).
+   - `RecursiveChunker` splits text into word-based chunks (default 500 words, 50-word overlap). In scripts written without spaces (Chinese, Japanese, Thai, ...) each character counts as one word.
    - `EmbeddingFactory` generates normalized vectors for each chunk.
    - `VectorStore.add()` saves chunks and `VectorStore.save_index_metadata()` persists index metadata.
+   - `KeywordIndex.build()` builds the BM25 keyword index from the chunk texts and saves it as `<storeDir>/<namespace>/keyword.json`.
 
 ### 4.2 Retrieval & Answer Synthesis
-1. `doc.search(query, top_k)`:
-   - Embeds query text.
-   - Executes vector search via `VectorStore.search()`, calculating cosine similarity over L2-normalized vectors.
-   - Returns top $K$ `SearchResult` objects.
+1. `doc.search(query, top_k=..., mode=...)`:
+   - `vector` (default): embeds the query and runs `VectorStore.search()` (cosine similarity over L2-normalized vectors).
+   - `keyword`: BM25 over the keyword index (`retrieval/keyword_index.py`), or the store's own `keyword_search()` if it has one.
+   - `hybrid`: both lists (each `candidates` long, the vector list filtered by `scoreThreshold`), merged with Reciprocal Rank Fusion (`retrieval/fusion.py`).
+   - Terms come from the `raglite-v1` tokenizer (`text/tokenizer.py`): NFKC + lowercase words, code identifiers kept whole, character bigrams for CJK and Thai. The TypeScript SDK must produce identical terms and scores; `tests/fixtures/shared/` checks this.
+   - `DocumentCollection` merges every document's vector list and keyword list first and fuses once, because BM25 statistics are per document.
 2. `doc.ask(question, options)`:
-   - Runs `search(question)`.
+   - Runs `search(question)` with the same retrieval options.
    - Constructs context-augmented system/user prompt via `build_prompt()`.
    - Calls `generate_answer()` or `stream_answer()` with selected LLM adapter (OpenAI, Anthropic, Google, Groq, Ollama, etc.).
 
@@ -152,7 +155,7 @@ Built using **FastAPI** framework for async capabilities, automatic OpenAPI docs
 | :--- | :--- | :--- | :--- |
 | `GET` | `/health` | No | Liveness status & total chunk count |
 | `GET` | `/info` | Yes (Bearer token) | Configuration details & index state |
-| `POST` | `/search` | Yes (Bearer token) | Semantic vector search |
+| `POST` | `/search` | Yes (Bearer token) | Vector, keyword or hybrid search (`mode`) |
 | `POST` | `/ask` | Yes (Bearer token) | Context Q&A generation (supports streaming via StreamingResponse) |
 
 ---
@@ -190,4 +193,8 @@ class VectorStore(ABC):
 
     @abstractmethod
     def read_index_metadata(self) -> Optional[IndexMetadata]: ...
+
+    # Optional (return None when unsupported):
+    def list_chunks(self) -> Optional[List[IndexedChunk]]: ...  # rebuild a missing keyword index
+    def keyword_search(self, query: str, top_k: int) -> Optional[List[VectorSearchHit]]: ...  # native keyword search
 ```

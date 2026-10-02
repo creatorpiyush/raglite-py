@@ -129,8 +129,8 @@ class TestCliSearch:
 class TestCliParsing:
     def test_parse_common_embedding_defaults(self):
         from raglite.cli import parse_common_embedding
-        result = parse_common_embedding({})
-        assert result["provider"] == "local"
+        assert parse_common_embedding({}) is None
+        assert parse_common_embedding({"embed_model": "m"})["provider"] == "local"
 
     def test_parse_common_embedding_with_key(self):
         from raglite.cli import parse_common_embedding

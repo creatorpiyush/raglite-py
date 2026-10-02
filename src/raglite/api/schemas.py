@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -11,6 +11,7 @@ class SearchRequest(BaseModel):
     scoreThreshold: Optional[float] = Field(
         default=None, alias="scoreThreshold", ge=-1.0, le=1.0
     )
+    mode: Optional[Literal["vector", "keyword", "hybrid"]] = None
 
 
 class AskRequest(BaseModel):
@@ -21,6 +22,7 @@ class AskRequest(BaseModel):
     scoreThreshold: Optional[float] = Field(
         default=None, alias="scoreThreshold", ge=-1.0, le=1.0
     )
+    mode: Optional[Literal["vector", "keyword", "hybrid"]] = None
     includeCitations: Optional[bool] = Field(
         default=None, alias="includeCitations"
     )

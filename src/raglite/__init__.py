@@ -41,20 +41,34 @@ from .loaders import (
     is_supported_file,
     is_url,
 )
-from .retrieval import Retriever
+from .retrieval import (
+    KeywordHit,
+    KeywordIndex,
+    RankedList,
+    RetrievalPlan,
+    Retriever,
+    reciprocal_rank_fusion,
+    resolve_retrieval_plan,
+)
+from .text import TOKENIZER_NAME, tokenize
 from .types import (
     AnswerResult,
     ChunkMetadata,
     EmbeddingProviderConfig,
     EmbeddingProviderName,
+    HybridOptions,
     IndexMetadata,
     LLMProviderConfig,
     LLMProviderName,
+    RetrievalMode,
+    RetrievalOptions,
     SearchResult,
+    SearchScores,
     StoredChunk,
 )
 from .utils.logger import create_logger
 from .vectordb import MemoryVectorStore
+from .vectordb.base import IndexedChunk, VectorSearchHit, VectorStore
 
 VERSION = PACKAGE_VERSION
 
@@ -78,6 +92,10 @@ __all__ = [
     "ChunkMetadata",
     "StoredChunk",
     "SearchResult",
+    "SearchScores",
+    "RetrievalMode",
+    "RetrievalOptions",
+    "HybridOptions",
     "AnswerResult",
     "IndexMetadata",
     "DocumentOptions",
@@ -97,7 +115,18 @@ __all__ = [
     "BaseChunker",
     "RecursiveChunker",
     "MemoryVectorStore",
+    "VectorStore",
+    "VectorSearchHit",
+    "IndexedChunk",
     "Retriever",
+    "KeywordIndex",
+    "KeywordHit",
+    "RankedList",
+    "RetrievalPlan",
+    "reciprocal_rank_fusion",
+    "resolve_retrieval_plan",
+    "tokenize",
+    "TOKENIZER_NAME",
     "DEFAULT_EMBEDDING_MODELS",
     "LocalEmbedder",
     "RemoteEmbedder",

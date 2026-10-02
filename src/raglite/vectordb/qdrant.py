@@ -6,7 +6,7 @@ from typing import List, Optional
 
 from ..errors import VectorDBError
 from ..types import ChunkMetadata, IndexMetadata, StoredChunk
-from .base import VectorSearchHit, VectorStore
+from .base import IndexedChunk, VectorSearchHit, VectorStore
 
 
 def _uuid_from_str(s: str) -> str:
@@ -155,6 +155,39 @@ class QdrantVectorStore(VectorStore):
 
     def count(self) -> int:
         return self._count_cache
+
+    def list_chunks(self) -> List[IndexedChunk]:
+        chunks: List[IndexedChunk] = []
+        offset = None
+        while True:
+            body: dict = {"limit": 256, "with_payload": True, "with_vector": False}
+            if offset is not None:
+                body["offset"] = offset
+            if self._shared:
+                body["filter"] = self._namespace_filter()
+            data = self._request("POST", f"/collections/{self._collection}/points/scroll", body)
+            result = data.get("result") or {}
+            for p in result.get("points", []):
+                payload = p.get("payload") or {}
+                if p.get("id") == self._metadata_id or payload.get("isMetadata"):
+                    continue
+                raw_meta = payload.get("metadata") or {}
+                chunks.append(
+                    IndexedChunk(
+                        id=payload.get("id", p.get("id")),
+                        text=payload.get("text", ""),
+                        metadata=ChunkMetadata(
+                            source=raw_meta.get("source", ""),
+                            chunk=raw_meta.get("chunk", 0),
+                            totalChunks=raw_meta.get("totalChunks", 0),
+                        ),
+                    )
+                )
+            offset = result.get("next_page_offset")
+            if offset is None:
+                break
+        # Scroll returns points in id (uuid) order; restore chunk order.
+        return sorted(chunks, key=lambda c: c.id)
 
     def save_index_metadata(self, metadata: IndexMetadata) -> None:
         dim = metadata.embeddingDimensions
