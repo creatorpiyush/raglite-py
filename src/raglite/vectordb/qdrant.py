@@ -197,6 +197,7 @@ class QdrantVectorStore(VectorStore):
         try:
             return IndexMetadata(
                 version=payload.get("version", ""),
+                formatVersion=payload.get("formatVersion"),
                 source=payload.get("source", ""),
                 sourceHash=payload.get("sourceHash", ""),
                 chunkSize=payload.get("chunkSize", 0),

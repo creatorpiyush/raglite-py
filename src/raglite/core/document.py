@@ -4,7 +4,7 @@ from typing import Any, Dict, Generator, Optional, Union
 
 from ..chunking import RecursiveChunker
 from ..config import DocumentOptions, ResolvedConfig, resolve_config
-from ..constants import PACKAGE_VERSION
+from ..constants import INDEX_FORMAT_VERSION, LEGACY_FORMAT_1_VERSIONS, PACKAGE_VERSION
 from ..embeddings import Embedder, create_embedder
 from ..errors import FileNotIndexedError, LoaderError, RagLiteError
 from ..llm import generate_answer, stream_answer
@@ -168,6 +168,7 @@ class Document:
         from datetime import timezone
         metadata = IndexMetadata(
             version=PACKAGE_VERSION,
+            formatVersion=INDEX_FORMAT_VERSION,
             source=self.file_path,
             sourceHash=source_hash,
             chunkSize=c_size,
@@ -361,7 +362,7 @@ class Document:
         overlap: int,
         embeddings_config: Any,
     ) -> bool:
-        if existing.version != PACKAGE_VERSION:
+        if index_format_version(existing) != INDEX_FORMAT_VERSION:
             return False
         if existing.sourceHash != source_hash:
             return False
@@ -376,6 +377,13 @@ class Document:
         if req_model is not None and req_model != existing.embeddingModel:
             return False
         return True
+
+
+def index_format_version(metadata: IndexMetadata) -> Optional[int]:
+    """Indexes written before ``formatVersion`` existed are identified by package version."""
+    if metadata.formatVersion is not None:
+        return metadata.formatVersion
+    return 1 if metadata.version in LEGACY_FORMAT_1_VERSIONS else None
 
 
 def _query_embeddings_config(

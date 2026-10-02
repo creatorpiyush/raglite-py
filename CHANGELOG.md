@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.2.2] - Unreleased
+
+### Changed
+- **Upgrades keep cached indexes:** The build cache is now keyed on an index format version (`formatVersion` in `IndexMetadata`) instead of the package version, so upgrading RAGLite no longer re-embeds every index. Indexes built by 1.2.1 are reused as-is; indexes from older releases are rebuilt once.
+
+### Fixed
+- **Chunker parity with the TypeScript SDK:** Words are now split on exactly the whitespace characters JavaScript treats as whitespace. Previously text containing a byte order mark (U+FEFF), U+0085 or U+001C–U+001F was chunked differently from the TypeScript SDK. Existing indexes are not rebuilt for this; pass `rebuild=True` if your sources contain those characters.
+- **Docs:** ARCHITECTURE.md now describes the word-based `RecursiveChunker` (500 words, 50 overlap) and the actual `VectorStore` interface. The README no longer lists LanceDB, which is TypeScript-only.
+
+### Internal
+- Added cross-SDK fixtures (`tests/fixtures/shared/`, copied from the TypeScript SDK with `scripts/sync_shared_fixtures.py`) that pin chunking and hashing output. CI fails if the copy is out of date.
+
 ## [1.2.1] - 2026-10-02
 
 ### Fixed

@@ -126,9 +126,9 @@ graph TD
 ### 4.1 Ingestion & Indexing
 1. `doc.build()` invokes the appropriate `BaseLoader` based on file extension (`.pdf`, `.txt`, `.json`, `.md`, `.docx`).
 2. Calculates SHA-256 hash of raw document content.
-3. Checks existing `IndexMetadata` in `VectorStore`. If hash matches, skips re-indexing.
+3. Checks existing `IndexMetadata` in `VectorStore`. The cached index is reused when the index format version, content hash, chunk size, overlap and embedding provider/model all match (URL sources are hashed by their fetched text).
 4. If hash differs or force rebuild requested:
-   - `RecursiveCharacterTextSplitter` chunks text (default size 1000, overlap 200).
+   - `RecursiveChunker` splits text into word-based chunks (default 500 words, 50-word overlap).
    - `EmbeddingFactory` generates normalized vectors for each chunk.
    - `VectorStore.add()` saves chunks and `VectorStore.save_index_metadata()` persists index metadata.
 
@@ -162,27 +162,32 @@ Built using **FastAPI** framework for async capabilities, automatic OpenAPI docs
 ```python
 from abc import ABC, abstractmethod
 from typing import List, Optional
-from raglite.types import IndexMetadata, SearchResult, StoredChunk
+from raglite.types import IndexMetadata, StoredChunk
+from raglite.vectordb.base import VectorSearchHit
 
 class VectorStore(ABC):
+    @property
     @abstractmethod
-    def load(self, doc_id: str) -> None: ...
+    def namespace(self) -> str: ...
 
     @abstractmethod
-    def reset(self, doc_id: str) -> None: ...
+    def load(self) -> None: ...
 
     @abstractmethod
-    def add(self, doc_id: str, chunks: List[StoredChunk]) -> None: ...
+    def reset(self) -> None: ...
 
     @abstractmethod
-    def search(self, doc_id: str, query_vector: List[float], top_k: int, min_score: Optional[float] = None) -> List[SearchResult]: ...
+    def add(self, chunks: List[StoredChunk]) -> None: ...
 
     @abstractmethod
-    def count(self, doc_id: str) -> int: ...
+    def search(self, embedding: List[float], top_k: int) -> List[VectorSearchHit]: ...
 
     @abstractmethod
-    def save_index_metadata(self, doc_id: str, meta: IndexMetadata) -> None: ...
+    def count(self) -> int: ...
 
     @abstractmethod
-    def read_index_metadata(self, doc_id: str) -> Optional[IndexMetadata]: ...
+    def save_index_metadata(self, metadata: IndexMetadata) -> None: ...
+
+    @abstractmethod
+    def read_index_metadata(self) -> Optional[IndexMetadata]: ...
 ```

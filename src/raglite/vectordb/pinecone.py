@@ -126,7 +126,8 @@ class PineconeVectorStore(VectorStore):
     def save_index_metadata(self, metadata: IndexMetadata) -> None:
         dim = metadata.embeddingDimensions
         zero_vec = [0.0] * dim
-        payload = metadata.model_dump(by_alias=True)
+        # Pinecone rejects null metadata values.
+        payload = metadata.model_dump(by_alias=True, exclude_none=True)
         payload["isMetadata"] = True
         self._request(
             "POST",
@@ -154,6 +155,9 @@ class PineconeVectorStore(VectorStore):
         try:
             return IndexMetadata(
                 version=m.get("version", ""),
+                formatVersion=(
+                    int(m["formatVersion"]) if m.get("formatVersion") is not None else None
+                ),
                 source=m.get("source", ""),
                 sourceHash=m.get("sourceHash", ""),
                 chunkSize=int(m.get("chunkSize", 0)),
