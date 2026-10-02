@@ -4,11 +4,12 @@ from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional, Union
 
 from ..config import DocumentOptions, ResolvedConfig, resolve_config
-from ..errors import RagLiteError
+from ..errors import ConfigError, RagLiteError
 from ..llm import generate_answer, stream_answer
 from ..loaders import DirectoryLoader, is_supported_file, is_url
 from ..types import AnswerResult, SearchResult
 from ..utils.logger import Logger, create_logger
+from ..vectordb import VectorStore
 from .document import Document
 
 
@@ -91,6 +92,16 @@ class DocumentCollection:
                     self.logger.warning(msg)
                     errors.append({"source": src, "error": msg})
 
+        # A VectorStore instance has a single namespace, so every document would
+        # share it and each build() would reset the previous document's index.
+        raw_store = self.options.get("vectorStore") if isinstance(self.options, dict) else None
+        if isinstance(raw_store, VectorStore) and len(set(file_list)) > 1:
+            raise ConfigError(
+                "A VectorStore instance cannot be shared by multiple documents in a "
+                "DocumentCollection. Pass a vector store provider config "
+                '(e.g. {"provider": "qdrant", ...}) instead.'
+            )
+
         total_chunks = 0
         cached_docs = 0
         new_docs = 0
@@ -146,12 +157,19 @@ class DocumentCollection:
         st = score_threshold if score_threshold is not None else opts.get("scoreThreshold", opts.get("score_threshold", self.config.scoreThreshold))
 
         all_hits: List[SearchResult] = []
+        failures: List[Exception] = []
         for doc in self.documents.values():
             try:
                 hits = doc.search(query, top_k=tk * 2, score_threshold=st)
                 all_hits.extend(hits)
-            except Exception:
-                continue
+            except Exception as err:
+                failures.append(err)
+                self.logger.warning(f'Search failed for document "{doc.file_path}": {err}')
+
+        # One broken document should not hide results from the others, but if
+        # every document failed the caller needs the error, not an empty list.
+        if len(failures) == len(self.documents):
+            raise failures[0]
 
         all_hits.sort(key=lambda h: h.score, reverse=True)
         return all_hits[:tk]
