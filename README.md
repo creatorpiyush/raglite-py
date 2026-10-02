@@ -13,6 +13,8 @@
 - 🤖 **Multi-provider LLMs** — OpenAI, Anthropic (Claude), Google (Gemini), Mistral, Cohere, Groq, xAI, Ollama
 - 🔢 **Multi-provider embeddings** — OpenAI, Google, Mistral, Cohere, Voyage, Ollama, or a **local** offline sentence-transformer (no API key needed)
 - 📐 **Cosine similarity** scoring with L2-normalized vectors
+- 🔎 **Hybrid search** — BM25 keyword search fused with vector search, for exact terms like error codes and SKUs
+- 🌏 **Any language** — Chinese, Japanese, Korean and Thai text is chunked and keyword-indexed correctly
 - ♻️ **Content-hash cache** — reindexes only when the file actually changes
 - 🗂 **Per-document namespacing** — indexes are isolated, two documents never collide
 - 🌐 **REST API** via FastAPI with optional **bearer-token auth**
@@ -80,6 +82,41 @@ hits = collection.search("refund policy", top_k=5)
 answer = collection.ask("What is the refund policy?")
 print(answer.text)
 ```
+
+---
+
+## Hybrid Search (Keyword + Vector)
+
+Vector search matches meaning, but it can miss exact terms such as error codes, SKUs, function names or rare product names. Keyword search (BM25) finds those exactly. `hybrid` runs both and merges the results with Reciprocal Rank Fusion.
+
+```python
+doc.search("ERR_4021", mode="hybrid")  # "vector" (default) | "keyword" | "hybrid"
+doc.ask("What does ERR_4021 mean?", {"mode": "hybrid"})
+
+# Or set a default once; it applies to search(), ask() and ask_stream().
+Document("./runbook.md", {
+    "retrieval": {
+        "mode": "hybrid",
+        "hybrid": {"rrfK": 60, "candidates": 50, "weights": {"vector": 1, "keyword": 1}},
+    },
+})
+```
+
+- In `keyword` and `hybrid` modes, `score` is the fused rank score scaled to 0..1 (1 means ranked first by every retriever). Each result also has `scores` with `vector`, `keyword` and `fused`. Vector mode results are unchanged.
+- `scoreThreshold` is still a cosine similarity. In hybrid mode it filters the vector results before fusion; keyword matches are not filtered by it.
+- The keyword index is built by `build()` from the chunk texts, with no extra embedding calls, and saved as `<storeDir>/<namespace>/keyword.json`. It works with every vector store. With Qdrant or Pinecone, keep `storeDir` on persistent disk.
+- Indexes built before 1.3: the memory and Qdrant stores build the keyword index from the stored chunks on the first keyword or hybrid search. Other stores log a warning and use vector search until you run `build(rebuild=True)`.
+- The same options work over HTTP (`"mode"` on `/search` and `/ask`) and in the CLI (`--mode hybrid`).
+
+The tokenizer is the same in the Python and TypeScript SDKs:
+
+| Text | How it is indexed |
+|------|-------------------|
+| Latin, Cyrillic, Greek, Arabic, Devanagari and other spaced scripts | Words, lowercased and NFKC-normalised (`ﬁ` → `fi`, `ＡＢＣ` → `abc`) |
+| Code identifiers | `gpt-4.1`, `snake_case` and `ERR_42` stay whole, and their parts are indexed too |
+| Chinese, Japanese, Korean, Thai, Lao, Khmer, Myanmar | Overlapping character pairs (`退款处理` → `退款`, `款处`, `处理`), so no dictionary is needed |
+
+There is no stemming or stopword list, because both are language-specific: in keyword mode `refund` does not match `refunds`. Hybrid mode's vector side covers those cases.
 
 ---
 
@@ -220,6 +257,7 @@ raglite index ./policy.pdf --embed-provider local
 
 # Semantic search
 raglite search ./docs "refund policy" --top-k 5
+raglite search ./docs "ERR_4021" --mode hybrid
 
 # Ask a question (streaming)
 raglite ask ./docs "What is the refund policy?" \
@@ -267,12 +305,13 @@ raglite serve https://example.com \
 ```python
 Document("./policy.pdf", {
     # Chunking
-    "chunkSize":      500,          # words per chunk (default: 500)
+    "chunkSize":      500,          # words per chunk; characters for Chinese, Japanese, Thai, ... (default: 500)
     "overlap":        50,           # overlapping words between chunks (default: 50)
 
     # Retrieval
     "topK":           5,            # default results returned (default: 5)
     "scoreThreshold": 0.0,          # minimum cosine similarity (0..1, default: 0)
+    "retrieval":      {"mode": "vector"},  # "vector" | "keyword" | "hybrid" (default: vector)
 
     # Storage
     "storeDir":       ".raglite",   # where indexes are persisted (default: .raglite)
@@ -295,9 +334,9 @@ Every `build()` call fingerprints the source (file bytes, or the fetched text fo
 | Factor | Triggers rebuild if changed |
 |--------|-----------------------------|
 | File content | SHA-256 hash differs |
-| Chunk size | `chunkSize` changed |
-| Overlap | `overlap` changed |
-| Embedding provider/model | Provider or model string changed |
+| Chunk size | `chunkSize` changed (when not set, the existing index's value is kept) |
+| Overlap | `overlap` changed (when not set, the existing index's value is kept) |
+| Embedding provider/model | Provider or model string changed (when no `embeddings` are configured, the existing index's are kept) |
 | Index format | Stored index layout changed by a release (rare; ordinary upgrades reuse the index) |
 
 Pass `rebuild=True` to `build()` to force a fresh index regardless.
@@ -316,6 +355,9 @@ from raglite.vectordb.base import VectorStore
 class MyVectorStore(VectorStore):
     # Implement: namespace (property), load, reset, add, search, count,
     #            save_index_metadata, read_index_metadata
+    # Optional:  list_chunks() lets hybrid search rebuild a missing keyword index
+    #            from your store; keyword_search(query, top_k) replaces the
+    #            built-in BM25 index with your own.
     ...
 ```
 

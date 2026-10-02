@@ -86,7 +86,9 @@ class TestApiServer:
         assert len(results) == 1
         assert results[0]["id"] == "1"
         assert results[0]["text"] == "Hello World"
-        mock_doc.search.assert_called_once_with("test query", top_k=3, score_threshold=None)
+        mock_doc.search.assert_called_once_with(
+            "test query", top_k=3, score_threshold=None, mode=None
+        )
 
     def test_ask_returns_answer(self, mock_doc):
         llm = {"provider": "openai", "apiKey": "sk-test"}

@@ -9,7 +9,12 @@ from .constants import (
     DEFAULT_STORE_DIRNAME,
     DEFAULT_TOP_K,
 )
-from .types import EmbeddingProviderConfig, LLMProviderConfig, VectorStoreProviderConfig
+from .types import (
+    EmbeddingProviderConfig,
+    LLMProviderConfig,
+    RetrievalOptions,
+    VectorStoreProviderConfig,
+)
 from .vectordb.base import VectorStore
 
 
@@ -25,6 +30,8 @@ class DocumentOptions(BaseModel):
     llm: Optional[LLMProviderConfig] = None
     vectorStore: Optional[VectorStoreProviderConfig] = Field(default=None, alias="vectorStore")
     logLevel: Optional[str] = Field(default=None, alias="logLevel")
+    # Default retrieval mode and hybrid options for search(), ask() and ask_stream().
+    retrieval: Optional[RetrievalOptions] = None
 
 
 class ResolvedConfig(BaseModel):
@@ -39,6 +46,7 @@ class ResolvedConfig(BaseModel):
     llm: Optional[LLMProviderConfig] = None
     vectorStore: Optional[VectorStoreProviderConfig] = Field(default=None, alias="vectorStore")
     logLevel: str = Field(..., alias="logLevel")
+    retrieval: RetrievalOptions = Field(default_factory=RetrievalOptions)
 
 
 def resolve_config(options: Optional[Union[DocumentOptions, Dict[str, Any]]] = None) -> ResolvedConfig:
@@ -70,5 +78,6 @@ def resolve_config(options: Optional[Union[DocumentOptions, Dict[str, Any]]] = N
         embeddings=embeddings,
         llm=opts.llm,
         vectorStore=opts.vectorStore,
-        logLevel=log_level
+        logLevel=log_level,
+        retrieval=opts.retrieval or RetrievalOptions(),
     )
