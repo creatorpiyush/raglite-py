@@ -229,3 +229,90 @@ class TestRetiredEmbeddingModel:
             embeddings = {"provider": "google", "model": "text-embedding-004", "apiKey": "k"}
             result = Document(sample_txt, {**opts, "embeddings": embeddings}).build()
             assert result["cached"] is True
+
+
+class TestChunkLocations:
+    def _chunks(self, doc):
+        return doc.store.list_chunks()
+
+    def test_records_the_page_of_each_pdf_chunk(self, tmp_dir):
+        from tests.pdf_helper import make_pdf
+
+        path = os.path.join(tmp_dir, "guide.pdf")
+        with open(path, "wb") as f:
+            f.write(make_pdf(["alpha beta gamma delta", "epsilon zeta", "eta theta iota"]))
+        LocalEmbedder = __import__("raglite.embeddings.local", fromlist=["LocalEmbedder"]).LocalEmbedder
+        with patch.object(LocalEmbedder, "embed_documents", side_effect=mock_embed_documents):
+            doc = Document(path, {"storeDir": tmp_dir, "chunkSize": 4, "overlap": 0, "logLevel": "silent"})
+            doc.build()
+        got = [(c.text, getattr(c.metadata, "page", None), getattr(c.metadata, "pageEnd", None)) for c in self._chunks(doc)]
+        assert got == [
+            ("alpha beta gamma delta", 1, None),
+            ("epsilon zeta eta theta", 2, 3),
+            ("iota", 3, None),
+        ]
+
+    def test_records_the_heading_path_of_each_markdown_chunk(self, tmp_dir):
+        path = os.path.join(tmp_dir, "guide.md")
+        with open(path, "w") as f:
+            f.write("# Policies\nIntro.\n## Refunds\nRefunds take thirty days.")
+        LocalEmbedder = __import__("raglite.embeddings.local", fromlist=["LocalEmbedder"]).LocalEmbedder
+        with patch.object(LocalEmbedder, "embed_documents", side_effect=mock_embed_documents):
+            doc = Document(path, {"storeDir": tmp_dir, "chunkSize": 3, "overlap": 0, "logLevel": "silent"})
+            doc.build()
+        sections = [getattr(c.metadata, "section", None) for c in self._chunks(doc)]
+        assert sections == ["Policies", "Policies > Refunds", "Policies > Refunds"]
+
+    def test_stored_metadata_has_no_null_location_keys(self, tmp_dir, sample_txt):
+        import json
+
+        LocalEmbedder = __import__("raglite.embeddings.local", fromlist=["LocalEmbedder"]).LocalEmbedder
+        with patch.object(LocalEmbedder, "embed_documents", side_effect=mock_embed_documents):
+            doc = Document(sample_txt, {"storeDir": tmp_dir, "logLevel": "silent"})
+            doc.build()
+        with open(os.path.join(tmp_dir, doc.namespace, "chunks.json")) as f:
+            stored = json.load(f)
+        assert not {"page", "pageEnd", "section"} & set(stored[0]["metadata"])
+
+
+class TestBuildProgressAndCancel:
+    MANY = " ".join(f"word{i}" for i in range(200))
+
+    def _embedder(self):
+        LocalEmbedder = __import__("raglite.embeddings.local", fromlist=["LocalEmbedder"]).LocalEmbedder
+        return patch.object(LocalEmbedder, "embed_documents", side_effect=mock_embed_documents)
+
+    def test_reports_progress_after_each_batch(self, tmp_dir):
+        path = os.path.join(tmp_dir, "big.txt")
+        with open(path, "w") as f:
+            f.write(self.MANY)
+        progress = []
+        with self._embedder():
+            Document(path, {"storeDir": tmp_dir, "chunkSize": 2, "overlap": 0, "logLevel": "silent"}).build(
+                on_progress=progress.append
+            )
+        # 100 chunks in batches of 64.
+        assert progress == [
+            {"source": "big.txt", "embedded": 64, "total": 100},
+            {"source": "big.txt", "embedded": 100, "total": 100},
+        ]
+
+    def test_cancel_stops_the_build_and_keeps_the_previous_index(self, tmp_dir):
+        import threading
+
+        from raglite.errors import BuildCancelledError
+
+        path = os.path.join(tmp_dir, "big.txt")
+        with open(path, "w") as f:
+            f.write(self.MANY)
+        opts = {"storeDir": tmp_dir, "chunkSize": 2, "overlap": 0, "logLevel": "silent"}
+        with self._embedder() as embed:
+            Document(path, opts).build()
+            embed.reset_mock()
+            cancel = threading.Event()
+            with pytest.raises(BuildCancelledError):
+                Document(path, opts).build(rebuild=True, cancel=cancel, on_progress=lambda _: cancel.set())
+            assert embed.call_count == 1  # stopped after the first batch
+        reopened = Document(path, opts)
+        assert reopened.search("word5", {"mode": "keyword", "topK": 1})
+        assert reopened.chunk_count == 100

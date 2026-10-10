@@ -3,7 +3,7 @@ from typing import Any, Dict, Generator, List, Optional
 from ..errors import LLMError
 from ..types import AnswerResult, LLMProviderConfig, SearchResult
 from .factory import ResolvedLLM, create_llm
-from .prompt import build_system_prompt, build_user_prompt
+from .prompt import build_system_prompt, build_user_prompt, extract_citations
 
 
 def generate_answer(
@@ -33,7 +33,9 @@ def generate_answer(
 
     try:
         res_dict = _generate(llm, system_prompt, user_prompt)
-        return AnswerResult.model_validate(res_dict)
+        result = AnswerResult.model_validate(res_dict)
+        result.citations = extract_citations(result.text or "", ctx)
+        return result
     except Exception as cause:
         raise LLMError(
             f"Failed to generate answer via {llm.provider} ({llm.model})",

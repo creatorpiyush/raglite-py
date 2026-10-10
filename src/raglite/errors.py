@@ -51,6 +51,11 @@ class ConfigError(RagLiteError):
     pass
 
 
+class BuildCancelledError(RagLiteError):
+    """Raised when build() is cancelled; the previous index is kept."""
+    pass
+
+
 def import_optional(module: str, extra: str, purpose: str) -> ModuleType:
     """Import an optional dependency, or raise ConfigError naming the extra to install."""
     try:

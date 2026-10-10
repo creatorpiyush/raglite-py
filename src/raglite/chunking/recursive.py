@@ -1,5 +1,5 @@
 import re
-from typing import List, Tuple
+from typing import List, NamedTuple, Tuple
 
 from ..errors import ChunkingError
 from ..text.scripts import has_unspaced_text, is_mark, is_unspaced_char
@@ -17,6 +17,14 @@ _JS_WHITESPACE = re.compile(
 _Unit = Tuple[str, bool]
 
 
+class Span(NamedTuple):
+    """A chunk and the units it covers, [start, end)."""
+
+    text: str
+    start: int
+    end: int
+
+
 class RecursiveChunker(BaseChunker):
     """Word-based recursive chunker with overlap.
 
@@ -27,6 +35,10 @@ class RecursiveChunker(BaseChunker):
     """
 
     def split(self, text: str) -> List[str]:
+        return [span.text for span in self.spans(text)]
+
+    def spans(self, text: str) -> List[Span]:
+        """Like split(), with each chunk's unit range, for locating it in the source."""
         if not _JS_WHITESPACE.sub("", text):
             return []
         if self.overlap >= self.chunk_size:
@@ -40,10 +52,10 @@ class RecursiveChunker(BaseChunker):
         else:
             units = [(w, True) for w in words]
         if len(units) <= self.chunk_size:
-            return [_render(units)]
+            return [Span(_render(units), 0, len(units))]
 
         step = self.chunk_size - self.overlap
-        chunks: List[str] = []
+        chunks: List[Span] = []
 
         start = 0
         while start < len(units):
@@ -51,12 +63,18 @@ class RecursiveChunker(BaseChunker):
             slice_units = units[start:end]
             if not slice_units:
                 break
-            chunks.append(_render(slice_units))
+            chunks.append(Span(_render(slice_units), start, start + len(slice_units)))
             if end >= len(units):
                 break
             start += step
 
         return chunks
+
+
+def count_units(text: str) -> int:
+    """Units in text as the chunker counts them. Counts add up across text
+    joined with whitespace, so offsets of pages or lines can be summed."""
+    return sum(len(_word_units(w)) for w in _JS_WHITESPACE.split(text) if w)
 
 
 def _word_units(word: str) -> List[_Unit]:

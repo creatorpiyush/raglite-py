@@ -141,6 +141,25 @@ class SearchResult(BaseModel):
         return data
 
 
+class Citation(BaseModel):
+    """A passage the answer cited as [n]."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    n: int  # the number used in the answer, e.g. 2 for "[2]"
+    source: str
+    chunk: int
+    page: Optional[int] = None
+    pageEnd: Optional[int] = None
+    section: Optional[str] = None
+    text: str  # the cited passage
+
+    @model_serializer(mode="wrap")
+    def _omit_unknown(self, handler: Any) -> Dict[str, Any]:
+        # Leave out page and section when unknown, as the TypeScript SDK does.
+        return {k: v for k, v in handler(self).items() if v is not None}
+
+
 class AnswerResult(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="allow")
 
@@ -149,6 +168,8 @@ class AnswerResult(BaseModel):
     model: str
     usage: Optional[Dict[str, Optional[int]]] = None
     finishReason: Optional[str] = Field(default=None, alias="finishReason")
+    # Passages the answer cites as [n], in order of first citation.
+    citations: List[Citation] = Field(default_factory=list)
 
 
 class IndexMetadata(BaseModel):
