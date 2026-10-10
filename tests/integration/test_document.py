@@ -141,3 +141,33 @@ class TestDocumentBuild:
             doc = Document(sample_txt, {"storeDir": tmp_dir})
             result = doc.build()
             assert doc.chunk_count == result["chunkCount"]
+
+
+class TestDocumentFromText:
+    def test_indexes_inline_text_and_reuses_it_by_id(self, tmp_dir):
+        text = " ".join(f"word{i}" for i in range(60))
+        opts = {"storeDir": tmp_dir, "chunkSize": 20, "overlap": 5}
+        LocalEmbedder = __import__(
+            "raglite.embeddings.local", fromlist=["LocalEmbedder"]
+        ).LocalEmbedder
+        with patch.object(
+            LocalEmbedder, "embed_documents", side_effect=mock_embed_documents
+        ), patch.object(LocalEmbedder, "embed_query", side_effect=mock_embed_query):
+            doc = Document.from_text("faq-42", text, opts)
+            assert doc.build()["cached"] is False
+            assert doc.search("word1", {"topK": 1})[0].metadata.source == "faq-42"
+
+            assert Document.from_text("faq-42", text, opts).build()["cached"] is True
+            changed = Document.from_text("faq-42", text + " updated", opts)
+            assert changed.build()["cached"] is False
+
+    def test_namespace_matches_typescript(self, tmp_dir):
+        # TS: namespaceFromPath(`text:${id}`)
+        from raglite.utils.hash import namespace_from_path
+
+        doc = Document.from_text("faq-42", "x", {"storeDir": tmp_dir})
+        assert doc.namespace == namespace_from_path("text:faq-42")
+
+    def test_rejects_empty_text(self, tmp_dir):
+        with pytest.raises(LoaderError):
+            Document.from_text("empty", "", {"storeDir": tmp_dir}).build()

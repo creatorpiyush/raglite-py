@@ -110,12 +110,8 @@ def _generate(llm: ResolvedLLM, system_prompt: str, user_prompt: str) -> dict:
             "model": llm.model,
             "system": system_prompt,
             "messages": [{"role": "user", "content": user_prompt}],
-            "temperature": llm.temperature,
         }
-        if llm.max_tokens is not None:
-            params["max_tokens"] = llm.max_tokens
-        else:
-            params["max_tokens"] = 4096
+        _anthropic_options(llm, params)
         resp = llm.client.messages.create(**params)
         usage = {}
         if resp.usage:
@@ -125,7 +121,8 @@ def _generate(llm: ResolvedLLM, system_prompt: str, user_prompt: str) -> dict:
                 "totalTokens": resp.usage.input_tokens + resp.usage.output_tokens,
             }
         return {
-            "text": resp.content[0].text,
+            # Thinking blocks may come before the text.
+            "text": "".join(b.text for b in resp.content if b.type == "text"),
             "provider": llm.provider,
             "model": llm.model,
             "usage": usage,
@@ -133,15 +130,11 @@ def _generate(llm: ResolvedLLM, system_prompt: str, user_prompt: str) -> dict:
         }
 
     elif p == "google":
-        model = llm.client.GenerativeModel(
-            model_name=llm.model,
-            system_instruction=system_prompt,
-            generation_config={
-                "temperature": llm.temperature,
-                "max_output_tokens": llm.max_tokens,
-            },
+        resp = llm.client.models.generate_content(
+            model=llm.model,
+            contents=user_prompt,
+            config=_google_config(llm, system_prompt),
         )
-        resp = model.generate_content(user_prompt)
         usage = {}
         if resp.usage_metadata:
             usage = {
@@ -247,26 +240,18 @@ def _stream(llm: ResolvedLLM, system_prompt: str, user_prompt: str) -> Generator
             "model": llm.model,
             "system": system_prompt,
             "messages": [{"role": "user", "content": user_prompt}],
-            "temperature": llm.temperature,
         }
-        if llm.max_tokens is not None:
-            params["max_tokens"] = llm.max_tokens
-        else:
-            params["max_tokens"] = 4096
+        _anthropic_options(llm, params)
         with llm.client.messages.stream(**params) as stream:
             for text in stream.text_stream:
                 yield text
 
     elif p == "google":
-        model = llm.client.GenerativeModel(
-            model_name=llm.model,
-            system_instruction=system_prompt,
-            generation_config={
-                "temperature": llm.temperature,
-                "max_output_tokens": llm.max_tokens,
-            },
+        resp = llm.client.models.generate_content_stream(
+            model=llm.model,
+            contents=user_prompt,
+            config=_google_config(llm, system_prompt),
         )
-        resp = model.generate_content(user_prompt, stream=True)
         for chunk in resp:
             if chunk.text:
                 yield chunk.text
@@ -309,3 +294,21 @@ def _stream(llm: ResolvedLLM, system_prompt: str, user_prompt: str) -> Generator
 # Aliases for TS parity
 generateAnswer = generate_answer
 streamAnswer = stream_answer
+
+
+def _google_config(llm: ResolvedLLM, system_prompt: str) -> dict:
+    """GenerateContentConfig fields for the google-genai client."""
+    config = {"system_instruction": system_prompt, "temperature": llm.temperature}
+    if llm.max_tokens is not None:
+        config["max_output_tokens"] = llm.max_tokens
+    return config
+
+
+def _anthropic_options(llm: ResolvedLLM, params: dict) -> None:
+    """max_tokens (thinking counts against it) and an explicitly configured temperature.
+
+    anthropic>=1.0 dropped the `temperature` argument, so it goes in extra_body.
+    """
+    params["max_tokens"] = llm.max_tokens if llm.max_tokens is not None else 16000
+    if llm.temperature is not None:
+        params["extra_body"] = {"temperature": llm.temperature}

@@ -1,6 +1,6 @@
 from typing import List, Optional
 
-from ..errors import EmbeddingError
+from ..errors import EmbeddingError, import_optional
 from ..types import EmbeddingProviderConfig, EmbeddingProviderName
 from .base import Embedder
 from .models import DEFAULT_EMBEDDING_MODELS
@@ -38,16 +38,16 @@ class LocalEmbedder(Embedder):
     def _ensure_model(self):
         if self._model is not None:
             return self._model
+        st = import_optional(
+            "sentence_transformers", "local", 'The "local" embedding provider'
+        )
         try:
-            from sentence_transformers import SentenceTransformer
-            self._model = SentenceTransformer(self._model_name)
-            return self._model
+            self._model = st.SentenceTransformer(self._model_name)
         except Exception as cause:
             raise EmbeddingError(
-                "Local embeddings require the 'sentence-transformers' package. "
-                "Install it with: pip install sentence-transformers",
-                cause=cause,
-            )
+                f"Failed to load local embedding model '{self._model_name}'", cause=cause
+            ) from cause
+        return self._model
 
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
         if not texts:

@@ -24,11 +24,11 @@ QUESTION = "Summarize the document in three bullet points."
 
 PROVIDERS: list[dict] = [
     {"provider": "openai",    "model": "gpt-4o-mini",                 "apiKey": os.environ.get("OPENAI_API_KEY")},
-    {"provider": "anthropic", "model": "claude-3-5-sonnet-20241022",  "apiKey": os.environ.get("ANTHROPIC_API_KEY")},
-    {"provider": "google",    "model": "gemini-2.0-flash",            "apiKey": os.environ.get("GOOGLE_GENERATIVE_AI_API_KEY")},
+    {"provider": "anthropic", "model": "claude-sonnet-5-5",          "apiKey": os.environ.get("ANTHROPIC_API_KEY")},
+    {"provider": "google",    "model": "gemini-3.8-flash",            "apiKey": os.environ.get("GOOGLE_GENERATIVE_AI_API_KEY")},
     {"provider": "mistral",   "model": "mistral-large-latest",        "apiKey": os.environ.get("MISTRAL_API_KEY")},
-    {"provider": "cohere",    "model": "command-r-plus",              "apiKey": os.environ.get("COHERE_API_KEY")},
-    {"provider": "groq",      "model": "llama-3.3-70b-versatile",     "apiKey": os.environ.get("GROQ_API_KEY")},
+    {"provider": "cohere",    "model": "command-a-03-2025",           "apiKey": os.environ.get("COHERE_API_KEY")},
+    {"provider": "groq",      "model": "openai/gpt-oss-120b",         "apiKey": os.environ.get("GROQ_API_KEY")},
 ]
 
 

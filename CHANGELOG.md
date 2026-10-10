@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.0.0] - 2026-10-10
+
+### Breaking changes
+- **Provider SDKs are now optional extras.** `pip install raglite-toolkit` no longer installs every provider SDK or `sentence-transformers` (with PyTorch). A fresh install drops from about 1.1 GB to 36 MB. Install the extras you use, for example `pip install 'raglite-toolkit[openai,local]'`, or `[all]` for everything. Extras: `openai`, `anthropic`, `google`, `cohere`, `mistral`, `voyage`, `local`, and `groq`, `xai` and `ollama` (these three install the `openai` client). When one is missing, RAGLite raises a `ConfigError` naming the `pip install` command to run.
+- **The default `local` embedding provider needs the `[local]` extra.** A missing `sentence-transformers` now raises `ConfigError` rather than `EmbeddingError`. A model that fails to load raises `EmbeddingError` with the real cause, instead of being reported as a missing package.
+- **Google moved from `google-generativeai` to `google-genai`.** Google has deprecated the old package. The `[google]` extra installs `google-genai`. `baseURL` is now honoured for Google.
+- **Python 3.11 or later is required.** Python 3.10 reaches end-of-life this month.
+- **Default models changed** where the provider has shut the old one down: Anthropic `claude-3-5-sonnet-20241022` → `claude-sonnet-5-5`, Google `gemini-2.0-flash` → `gemini-3.8-flash`, Cohere `command-r-plus` → `command-a-03-2025`, Groq `llama-3.3-70b-versatile` → `openai/gpt-oss-120b`, xAI `grok-2-latest` → `grok-4.7`, and Google embeddings `text-embedding-004` → `gemini-embedding-2`. Pass `model` to keep a different one.
+- **Anthropic gets no `temperature` unless you set one.** Claude 5 models reject non-default sampling values, and `anthropic` 1.x removed the argument. A configured `temperature` is sent through `extra_body` for older models that accept it. The default `max_tokens` for Anthropic is now 16000, because thinking tokens count against it.
+
+### Added
+- **`Document.from_text(id, text, options)`** indexes text you already have, such as a database row, an upload or CMS content, with no file. The `id` names the index and is each chunk's `source`; changed text is re-indexed on the next `build()`. It uses the same index namespace as the TypeScript SDK's `Document.fromText`.
+
+### Fixed
+- **Mistral with `mistralai` 2.x and later:** `Mistral` moved to `mistralai.client`, so `pip install raglite-toolkit` 1.3.0 with a current `mistralai` failed with an `ImportError`. Both layouts now work.
+- **Anthropic answers with thinking:** answers join the text blocks of the response rather than reading the first block, which is a thinking block on models that think by default.
+
+### Internal
+- CI runs on Python 3.11, 3.12 and 3.13.
+
+### Upgrade notes
+- Install the extras you use, for example `pip install 'raglite-toolkit[openai,local]'`.
+- Existing indexes are kept. An index built with Google embeddings and the old default model keeps using `text-embedding-004` for queries, which Google has shut down. Rebuild it with `build(rebuild=True)` to move to `gemini-embedding-2`.
+
 ## [1.3.0] - 2026-10-03
 
 ### Added
