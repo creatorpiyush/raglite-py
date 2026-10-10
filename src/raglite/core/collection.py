@@ -1,10 +1,11 @@
 import os
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, Generator, List, Optional, TypeVar, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, Generator, List, Optional, TypeVar, Union
 
 from ..config import DocumentOptions, ResolvedConfig, resolve_config
-from ..errors import ConfigError, RagLiteError
+from ..errors import BuildCancelledError, ConfigError, RagLiteError
 from ..llm import generate_answer, stream_answer
 from ..loaders import DirectoryLoader, is_supported_file, is_url
 from ..retrieval.fusion import reciprocal_rank_fusion
@@ -14,6 +15,9 @@ from ..types import AnswerResult, SearchResult
 from ..utils.logger import Logger, create_logger
 from ..vectordb import VectorStore
 from .document import Document, fusion_lists, search_options_of
+
+if TYPE_CHECKING:
+    from ..tools import SearchTool
 
 T = TypeVar("T")
 
@@ -57,8 +61,18 @@ class DocumentCollection:
             self.sources.append(src_str)
             self.ready = False
 
-    def build(self, options: Optional[Dict[str, Any]] = None, rebuild: bool = False) -> CollectionBuildResult:
-        """Build (or reuse) semantic indexes for all documents in the collection."""
+    def build(
+        self,
+        options: Optional[Dict[str, Any]] = None,
+        rebuild: bool = False,
+        on_progress: Optional[Callable[[Dict[str, Any]], None]] = None,
+        cancel: Optional[threading.Event] = None,
+    ) -> CollectionBuildResult:
+        """Build (or reuse) semantic indexes for all documents in the collection.
+
+        ``on_progress`` and ``cancel`` work as in Document.build(); progress carries
+        each document's ``source``.
+        """
         opts = options or {}
         should_rebuild = rebuild or bool(opts.get("rebuild", False))
 
@@ -118,7 +132,9 @@ class DocumentCollection:
                     doc = Document(file_path, self.options)
                     self.documents[file_path] = doc
 
-                built = doc.build(options, rebuild=should_rebuild)
+                built = doc.build(
+                    options, rebuild=should_rebuild, on_progress=on_progress, cancel=cancel
+                )
                 chunk_count = built.get("chunkCount", 0)
                 total_chunks += chunk_count
 
@@ -126,6 +142,8 @@ class DocumentCollection:
                     cached_docs += 1
                 else:
                     new_docs += 1
+            except BuildCancelledError:
+                raise
             except Exception as err:
                 err_msg = str(err)
                 self.logger.error(f'Failed to index document "{file_path}": {err_msg}')
@@ -245,6 +263,22 @@ class DocumentCollection:
             raise RagLiteError("No relevant context found in document collection to answer question.")
 
         yield from stream_answer({**opts, "llm": llm_config, "question": question, "context": context})
+
+    def as_tool(
+        self,
+        name: str = "search_documents",
+        description: Optional[str] = None,
+        top_k: Optional[int] = None,
+        mode: Optional[str] = None,
+    ) -> "SearchTool":
+        """A function-calling tool that searches every document in the collection.
+
+        Pass ``tool.openai_tool`` or ``tool.anthropic_tool`` in your request's tools;
+        when the model calls it, reply with ``tool(**arguments)``.
+        """
+        from ..tools import search_tool
+
+        return search_tool(self, name, description, top_k, mode)
 
     def serve(
         self,

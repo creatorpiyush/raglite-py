@@ -10,6 +10,7 @@ from .embeddings import (
     create_embedder,
 )
 from .errors import (
+    BuildCancelledError,
     ChunkingError,
     ConfigError,
     EmbeddingError,
@@ -28,6 +29,7 @@ from .llm import (
     generate_answer,
     stream_answer,
 )
+from .llm.prompt import extract_citations
 from .loaders import (
     BaseLoader,
     DirectoryLoader,
@@ -41,6 +43,7 @@ from .loaders import (
     is_supported_file,
     is_url,
 )
+from .mcp_server import create_mcp_server, serve_mcp
 from .retrieval import (
     KeywordHit,
     KeywordIndex,
@@ -51,9 +54,11 @@ from .retrieval import (
     resolve_retrieval_plan,
 )
 from .text import TOKENIZER_NAME, tokenize
+from .tools import SearchTool
 from .types import (
     AnswerResult,
     ChunkMetadata,
+    Citation,
     EmbeddingProviderConfig,
     EmbeddingProviderName,
     HybridOptions,
@@ -138,5 +143,11 @@ __all__ = [
     "generate_answer",
     "stream_answer",
     "Document",
+    "Citation",
+    "BuildCancelledError",
+    "SearchTool",
+    "extract_citations",
+    "create_mcp_server",
+    "serve_mcp",
     "DocumentCollection",
 ]

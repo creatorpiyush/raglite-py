@@ -18,6 +18,8 @@
 - ♻️ **Content-hash cache** — reindexes only when the file actually changes
 - 🗂 **Per-document namespacing** — indexes are isolated, two documents never collide
 - 🌐 **REST API** via FastAPI with optional **bearer-token auth**
+- 📑 **Citations** with page numbers and section headings
+- 🤝 **MCP server** and **function-calling tool** for agents
 - ⚡ **Streaming** answers
 - 🐍 **Python-native** — Pydantic models, type-annotated, fully testable
 
@@ -149,6 +151,74 @@ print(doc.ask("How do I reset the device?").text)
 
 ---
 
+## Citations
+
+`ask()` returns the passages the answer cites, with the page (PDF) and heading path (Markdown) of each:
+
+```python
+answer = doc.ask("What is the refund policy?")
+answer.text       # "Refunds are issued within 30 days [1]."
+answer.citations  # [Citation(n=1, source="policy.pdf", chunk=4, page=12, section="Policies > Refunds", text="...")]
+```
+
+- `n` is the number used in the answer. `[2]`, `[1][3]` and `[1, 3]` are all recognised; numbers that match no passage are ignored.
+- Search results carry the same `page`, `pageEnd` (when a chunk crosses a page break) and `section` in `metadata`.
+- Indexes built before 2.1 have no page or section until you run `build(rebuild=True)`. Answers still get `citations`, without those fields.
+- The REST `/ask` response includes `citations`, and `raglite ask` lists the sources under the answer.
+
+## Use from AI Agents (MCP)
+
+`raglite mcp` serves your documents to any MCP client (Claude Code, Claude Desktop, Cursor, VS Code) over stdio:
+
+```bash
+pip install 'raglite-toolkit[mcp,local]'
+claude mcp add docs -- raglite mcp /absolute/path/to/docs --store-dir /absolute/path/to/docs/.raglite
+```
+
+Claude Desktop, Cursor and VS Code use the same command in their MCP settings:
+
+```json
+{
+  "mcpServers": {
+    "docs": {
+      "command": "raglite",
+      "args": ["mcp", "/absolute/path/to/docs", "--store-dir", "/absolute/path/to/docs/.raglite"]
+    }
+  }
+}
+```
+
+- Use absolute paths, and pass `--store-dir`: MCP clients may start the server in any directory, and the index is kept in `./.raglite` by default. If `raglite` is not on the client's `PATH`, use the full path to it (for example `/path/to/.venv/bin/raglite`).
+- The first start indexes the documents, which can take longer than a client waits. Run the same command once in a terminal first (stop it with Ctrl+C); later starts reuse the index.
+
+Tools: `search` (`query`, optional `topK` and `mode`), `list_sources`, and `ask` when you pass `--llm-provider`. The tools match the TypeScript SDK's. From code: `serve_mcp(collection)`, or `create_mcp_server(collection)` for other transports.
+
+## Use as an Agent Tool
+
+`as_tool()` gives you a callable plus its tool definition for OpenAI or Anthropic function calling:
+
+```python
+tool = doc.as_tool(name="search_policies", description="Search the company policies.", top_k=5)
+
+response = client.messages.create(model=..., tools=[tool.anthropic_tool], messages=[...])  # or tool.openai_tool
+# When the model calls it:
+result = tool(**tool_use.input)   # JSON string of passages: source, chunk, page, section, score, text
+```
+
+## Progress and Cancellation
+
+```python
+import threading
+
+cancel = threading.Event()
+collection.build(
+    on_progress=lambda p: print(f"{p['source']}: {p['embedded']}/{p['total']}"),
+    cancel=cancel,   # cancel.set() from another thread stops the build
+)
+```
+
+Chunks are embedded in batches of 64, with `on_progress` called after each. A cancelled build raises `BuildCancelledError` and keeps the previous index, because the old index is replaced only once embedding finishes.
+
 ## Choose Any LLM at Ask-Time
 
 ```python
@@ -275,6 +345,9 @@ raglite search ./docs "ERR_4021" --mode hybrid
 # Ask a question (streaming)
 raglite ask ./docs "What is the refund policy?" \
   --llm-provider anthropic --llm-key $ANTHROPIC_API_KEY --stream
+
+# MCP server over stdio, for AI agents
+raglite mcp ./docs --llm-provider anthropic
 
 # Serve a REST API
 raglite serve https://example.com \

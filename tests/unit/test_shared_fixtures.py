@@ -97,3 +97,39 @@ def test_rrf_matches_typescript(case):
     for got, want in zip(actual, case["results"]):
         assert got.score == pytest.approx(want["score"], abs=1e-9)
         assert got.scores.model_dump() == pytest.approx(want["scores"], abs=1e-9)
+
+
+_LOCATIONS = _load("locations.json")
+
+
+@pytest.mark.parametrize("case", _LOCATIONS["chunks"], ids=lambda c: c["name"])
+def test_chunk_locations(case):
+    from raglite.chunking.locations import chunk_location, markdown_headings, page_starts
+
+    if "pages" in case:
+        text = "\n".join(case["pages"])
+        layout = {"pageStarts": page_starts(case["pages"])}
+    else:
+        text = case["markdown"]
+        layout = {"headings": markdown_headings(text)}
+    spans = RecursiveChunker(case["chunkSize"], case["overlap"]).spans(text)
+    got = [{**span._asdict(), **chunk_location(layout, span)} for span in spans]
+    assert got == case["chunks"]
+
+
+@pytest.mark.parametrize("case", _LOCATIONS["citations"], ids=lambda c: c["answer"])
+def test_citations(case):
+    from raglite.llm.prompt import extract_citations
+    from raglite.types import SearchResult
+
+    context = [
+        SearchResult(
+            id=f"c{n}",
+            text=f"passage {n}",
+            metadata=ChunkMetadata(source="doc.pdf", chunk=n, totalChunks=3, page=n),
+            score=1.0,
+            distance=0.0,
+        )
+        for n in (1, 2, 3)
+    ]
+    assert [c.n for c in extract_citations(case["answer"], context)] == case["cited"]

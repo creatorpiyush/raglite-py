@@ -17,8 +17,12 @@ Usage:
   raglite search <path|url> "query"   [--top-k N] [--mode vector|keyword|hybrid]
   raglite ask <path|url> "question"   --llm-provider P [--llm-model M] [--llm-key K] [--stream] [--mode M]
   raglite serve <path|url>            --llm-provider P [--llm-key K] [--host H] [--port N] [--token T] [--mode M]
+  raglite mcp <path|url>              [--llm-provider P] [--llm-model M] [--llm-key K] [--mode M]
+                             MCP server over stdio (needs: pip install 'raglite-toolkit[mcp]')
   raglite --help
   raglite --version
+
+Every command also takes --store-dir D: where indexes are kept (default ./.raglite).
 
 Providers:
   LLM:        openai, anthropic, google, mistral, cohere, groq, xai, ollama
@@ -60,7 +64,11 @@ def parse_llm(args_dict: dict) -> Optional[dict]:
     return config
 
 
-def resolve_target(source: str, options: dict) -> Union[Document, DocumentCollection]:
+def resolve_target(
+    source: str, options: dict, store_dir: Optional[str] = None
+) -> Union[Document, DocumentCollection]:
+    if store_dir:
+        options = {**options, "storeDir": store_dir}
     if is_url(source):
         return Document(source, options)
     resolved = os.path.abspath(source)
@@ -79,10 +87,11 @@ def run_index(args):
     parser.add_argument("--embed-key")
     parser.add_argument("--rebuild", action="store_true")
 
+    parser.add_argument("--store-dir")
     parsed = parser.parse_args(args)
 
     embeddings = parse_common_embedding(vars(parsed))
-    target = resolve_target(parsed.file, _with_embeddings({}, embeddings))
+    target = resolve_target(parsed.file, _with_embeddings({}, embeddings), parsed.store_dir)
 
     build_opts = {}
     if parsed.chunk_size is not None:
@@ -107,10 +116,11 @@ def run_search(args):
     parser.add_argument("--embed-model")
     parser.add_argument("--embed-key")
 
+    parser.add_argument("--store-dir")
     parsed = parser.parse_args(args)
 
     embeddings = parse_common_embedding(vars(parsed))
-    target = resolve_target(parsed.file, _with_embeddings({}, embeddings))
+    target = resolve_target(parsed.file, _with_embeddings({}, embeddings), parsed.store_dir)
 
     search_opts = {}
     if parsed.top_k is not None:
@@ -137,12 +147,13 @@ def run_ask(args):
     parser.add_argument("--stream", action="store_true")
     parser.add_argument("--mode", choices=_MODES)
 
+    parser.add_argument("--store-dir")
     parsed = parser.parse_args(args)
 
     embeddings = parse_common_embedding(vars(parsed))
     llm = parse_llm(vars(parsed))
 
-    target = resolve_target(parsed.file, _with_embeddings({"llm": llm}, embeddings))
+    target = resolve_target(parsed.file, _with_embeddings({"llm": llm}, embeddings), parsed.store_dir)
 
     opts = {}
     if parsed.top_k is not None:
@@ -158,6 +169,11 @@ def run_ask(args):
     else:
         answer = target.ask(parsed.question, opts)
         sys.stdout.write(f"{answer.text}\n")
+        if answer.citations:
+            sys.stdout.write("\nSources:\n")
+            for c in answer.citations:
+                where = ", ".join(x for x in (f"p. {c.page}" if c.page else "", c.section or "") if x)
+                sys.stdout.write(f"  [{c.n}] {c.source}{f' ({where})' if where else ''}\n")
 
 
 def run_serve(args):
@@ -174,6 +190,7 @@ def run_serve(args):
     parser.add_argument("--token")
     parser.add_argument("--mode", choices=_MODES)
 
+    parser.add_argument("--store-dir")
     parsed = parser.parse_args(args)
 
     embeddings = parse_common_embedding(vars(parsed))
@@ -184,7 +201,7 @@ def run_serve(args):
         options["llm"] = llm
     if parsed.mode:
         options["retrieval"] = {"mode": parsed.mode}
-    target = resolve_target(parsed.file, options)
+    target = resolve_target(parsed.file, options, parsed.store_dir)
     target.build()
 
     host = parsed.host or DEFAULT_HOST
@@ -206,6 +223,33 @@ def run_serve(args):
     except KeyboardInterrupt:
         handle.close()
         sys.exit(0)
+
+
+def run_mcp(args):
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("file")
+    parser.add_argument("--embed-provider")
+    parser.add_argument("--embed-model")
+    parser.add_argument("--embed-key")
+    parser.add_argument("--llm-provider")
+    parser.add_argument("--llm-model")
+    parser.add_argument("--llm-key")
+    parser.add_argument("--mode", choices=_MODES)
+    parser.add_argument("--store-dir")
+    parsed = parser.parse_args(args)
+
+    options: dict = _with_embeddings({}, parse_common_embedding(vars(parsed)))
+    llm = parse_llm(vars(parsed))
+    if llm:
+        options["llm"] = llm
+    if parsed.mode:
+        options["retrieval"] = {"mode": parsed.mode}
+    target = resolve_target(parsed.file, options, parsed.store_dir)
+    target.build()
+
+    from .mcp_server import serve_mcp
+
+    serve_mcp(target)
 
 
 def main():
@@ -231,6 +275,8 @@ def main():
             run_ask(args)
         elif command == "serve":
             run_serve(args)
+        elif command == "mcp":
+            run_mcp(args)
         else:
             sys.stderr.write(f"Unknown command: {command}\n\n{HELP}")
             sys.stderr.flush()

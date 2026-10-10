@@ -8,7 +8,7 @@ packages = ["src/raglite"]
 
 [project]
 name = "raglite-toolkit"
-version = "2.0.1"
+version = "2.1.0"
 description = "Build semantic search, multi-provider question answering, and REST APIs over your documents in a few lines of Python."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -18,7 +18,7 @@ authors = [
 ]
 keywords = [
     "rag", "retrieval-augmented-generation", "llm", "embeddings",
-    "semantic-search", "openai", "anthropic", "ollama", "vector-store"
+    "semantic-search", "openai", "anthropic", "ollama", "vector-store", "mcp"
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -62,7 +62,8 @@ cohere = ["cohere>=5.11.0"]  # ClientV2 (v2 chat and embed)
 mistral = ["mistralai>=1.0.0"]
 voyage = ["voyageai>=0.1.0"]
 local = ["sentence-transformers>=2.2.0"]
-all = ["raglite-toolkit[openai,anthropic,google,cohere,mistral,voyage,local]"]
+mcp = ["mcp>=2.1"]
+all = ["raglite-toolkit[openai,anthropic,google,cohere,mistral,voyage,local,mcp]"]
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
@@ -73,7 +74,7 @@ dev = [
     "twine>=5.0.0",
     "ruff>=0.4.0",
     "mypy>=1.10",
-    "raglite-toolkit[openai]",  # tests build real OpenAI-compatible clients
+    "raglite-toolkit[openai,mcp]",  # tests build real OpenAI-compatible clients and MCP servers
 ]
 
 [tool.pytest.ini_options]

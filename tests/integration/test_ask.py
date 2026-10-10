@@ -80,6 +80,7 @@ class TestAsk:
         ), patch("raglite.llm.answer._generate", return_value=MOCK_ANSWER_DICT):
             result = indexed_doc.ask("What is this?", {"llm": llm_config})
             assert result.text == "This is the mocked answer."
+            assert result.citations == []  # the mocked answer cites nothing
             assert result.provider == "openai"
 
     def test_ask_stream_yields_text_deltas(self, indexed_doc):
@@ -102,3 +103,18 @@ class TestAsk:
         ):
             with pytest.raises(RagLiteError, match="No LLM provider"):
                 list(indexed_doc.ask_stream("What is this?"))
+
+
+def test_ask_returns_the_cited_passages(indexed_doc):
+    llm_config = {"provider": "openai", "apiKey": "sk-test"}
+    cited = {**MOCK_ANSWER_DICT, "text": "Words [1] and more [1, 99]."}
+    with patch.object(
+        __import__("raglite.embeddings.local", fromlist=["LocalEmbedder"]).LocalEmbedder,
+        "embed_query",
+        side_effect=mock_embed_query,
+    ), patch("raglite.llm.answer._generate", return_value=cited):
+        result = indexed_doc.ask("What is this?", {"llm": llm_config})
+    assert [c.n for c in result.citations] == [1]
+    assert result.citations[0].source == "doc.txt"
+    # Unknown page and section are left out of the JSON, as in the TypeScript SDK.
+    assert set(result.model_dump(by_alias=True)["citations"][0]) == {"n", "source", "chunk", "text"}

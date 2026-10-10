@@ -1,6 +1,7 @@
+import re
 from typing import Any, Dict, List, Optional
 
-from ..types import SearchResult
+from ..types import Citation, SearchResult
 
 
 def build_system_prompt(
@@ -42,7 +43,7 @@ def build_user_prompt(
     parts = []
     for index, chunk in enumerate(context):
         if inc_cit:
-            tag = f"[{index + 1}] ({chunk.metadata.source} #{chunk.metadata.chunk})"
+            tag = f"[{index + 1}] ({_describe_source(chunk)})"
         else:
             tag = f"[{index + 1}]"
         parts.append(f"{tag}\n{chunk.text}")
@@ -55,6 +56,49 @@ def build_user_prompt(
     )
 
     return f"Context:\n{context_block}\n\nQuestion: {question}{citation_instruction}\n\nAnswer:"
+
+
+def _describe_source(chunk: SearchResult) -> str:
+    """"policy.pdf #3, p. 12, Refunds": what the model sees next to each passage number."""
+    meta = chunk.metadata
+    label = f"{meta.source} #{meta.chunk}"
+    page, page_end = getattr(meta, "page", None), getattr(meta, "pageEnd", None)
+    if page is not None:
+        label += f", pp. {page}-{page_end}" if page_end is not None else f", p. {page}"
+    section = getattr(meta, "section", None)
+    if section:
+        label += f", {section}"
+    return label
+
+
+_CITATION = re.compile(r"\[([0-9]+(?:[ \t]*,[ \t]*[0-9]+)*)\]")
+
+
+def extract_citations(answer: str, context: List[SearchResult]) -> List[Citation]:
+    """The passages cited in an answer, in order of first citation. Understands
+    "[2]", "[1][3]" and "[1, 3]"; numbers outside the context are ignored."""
+    seen = set()
+    citations: List[Citation] = []
+    for match in _CITATION.finditer(answer):
+        for part in match.group(1).split(","):
+            n = int(part.strip())
+            if not 1 <= n <= len(context) or n in seen:
+                continue
+            seen.add(n)
+            chunk = context[n - 1]
+            meta = chunk.metadata
+            citations.append(
+                Citation(
+                    n=n,
+                    source=meta.source,
+                    chunk=meta.chunk,
+                    page=getattr(meta, "page", None),
+                    pageEnd=getattr(meta, "pageEnd", None),
+                    section=getattr(meta, "section", None),
+                    text=chunk.text,
+                )
+            )
+    return citations
 
 
 # Aliases for TS parity

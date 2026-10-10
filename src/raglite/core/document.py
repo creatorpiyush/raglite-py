@@ -1,9 +1,11 @@
 import os
+import threading
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, Generator, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, Generator, List, Optional, Union
 
 from ..chunking import RecursiveChunker
+from ..chunking.locations import SourceLayout, chunk_location, markdown_headings, page_starts
 from ..config import DocumentOptions, ResolvedConfig, resolve_config
 from ..constants import (
     DEFAULT_STORE_DIRNAME,
@@ -13,9 +15,9 @@ from ..constants import (
 )
 from ..embeddings import Embedder, create_embedder
 from ..embeddings.models import DEFAULT_EMBEDDING_MODELS, is_retired_embedding_model
-from ..errors import FileNotIndexedError, LoaderError, RagLiteError
+from ..errors import BuildCancelledError, FileNotIndexedError, LoaderError, RagLiteError
 from ..llm import generate_answer, stream_answer
-from ..loaders import get_loader, is_url
+from ..loaders import BaseLoader, get_loader, is_url
 from ..retrieval import Retriever
 from ..retrieval.fusion import RankedList, reciprocal_rank_fusion
 from ..retrieval.keyword_index import (
@@ -38,6 +40,9 @@ from ..types import (
 from ..utils.hash import hash_file, hash_string, namespace_from_path
 from ..utils.logger import create_logger
 from ..vectordb import MemoryVectorStore, VectorStore, create_vector_store
+
+if TYPE_CHECKING:
+    from ..tools import SearchTool
 
 
 @dataclass
@@ -124,8 +129,18 @@ class Document:
         overlap: Optional[int] = None,
         embeddings: Optional[Any] = None,
         rebuild: Optional[bool] = None,
+        on_progress: Optional[Callable[[Dict[str, Any]], None]] = None,
+        cancel: Optional[threading.Event] = None,
     ) -> Dict[str, Any]:
+        """Build (or reuse) the index.
+
+        ``on_progress`` is called after each batch of chunks is embedded with
+        ``{"source", "embedded", "total"}``. Setting ``cancel`` stops the build
+        between batches with BuildCancelledError; the previous index is kept.
+        """
         opts = options or {}
+        on_progress = on_progress or opts.get("onProgress") or opts.get("on_progress")
+        cancel = cancel or opts.get("cancel")
 
         c_size = chunk_size
         if c_size is None:
@@ -183,11 +198,18 @@ class Document:
             if retired:
                 # Inherited a shut-down model: fall back to the provider's current default.
                 embed_config = embed_config.model_copy(update={"model": None})
+        # The loader that produced `text`, for page boundaries.
+        loaders: List[BaseLoader] = []
+
+        def load_text() -> str:
+            loaders.append(get_loader(self.file_path))
+            return loaders[-1].load()
+
         # Web pages change without their URL changing, so fingerprint the
         # fetched content rather than the URL.
         text: Optional[str] = self._inline_text
         if text is None and is_url(self.file_path):
-            text = get_loader(self.file_path).load()
+            text = load_text()
         source_hash = hash_string(text) if text is not None else hash_file(self.file_path)
 
         # Re-embed an index built with a shut-down model unless that model was asked for explicitly.
@@ -218,7 +240,7 @@ class Document:
             # format-1 index of a source without such text is still exact:
             # upgrade it in place instead of paying to re-embed it.
             if text is None:
-                text = get_loader(self.file_path).load()
+                text = load_text()
             reusable = index_format_version(existing) == 1 and not has_unspaced_text(text)
             if reusable:
                 existing = existing.model_copy(update={"formatVersion": INDEX_FORMAT_VERSION})
@@ -240,42 +262,55 @@ class Document:
             }
 
         self.logger.info("Building new index...")
-        self._keyword_index = None
-        self.store.reset()
-        self.store.load()
 
         if text is None:
-            text = get_loader(self.file_path).load()
+            text = load_text()
         if not text:
             raise LoaderError(
                 f"Loader returned empty text for {self.file_path}"
             )
 
         chunker = RecursiveChunker(c_size, c_overlap)
-        chunks = chunker.split(text)
+        spans = chunker.spans(text)
+        chunks = [span.text for span in spans]
+        layout: SourceLayout = {}
+        pages = loaders[-1].pages if loaders else None
+        if pages is not None:
+            layout["pageStarts"] = page_starts(pages)
+        if self._inline_text is None and os.path.splitext(self.file_path)[1].lower() in (".md", ".markdown"):
+            layout["headings"] = markdown_headings(text)
         if len(chunks) == 0:
             raise RagLiteError(f"No chunks produced from {self.file_path}")
 
         self.logger.info(f"Produced {len(chunks)} chunk(s). Embedding...")
-
-        embedder = create_embedder(embed_config)
-        vectors = embedder.embed_documents(chunks)
-        if len(vectors) != len(chunks):
-            raise RagLiteError(
-                f"Embedder returned {len(vectors)} vectors for {len(chunks)} chunks"
-            )
 
         source = (
             self.file_path
             if self._inline_text is not None or is_url(self.file_path)
             else os.path.basename(self.file_path)
         )
+        embedder = create_embedder(embed_config)
+        # Batches so progress can be reported and a cancelled build stops early.
+        vectors: List[List[float]] = []
+        for i in range(0, len(chunks), _EMBED_BATCH_SIZE):
+            _check_cancel(cancel)
+            vectors.extend(embedder.embed_documents(chunks[i : i + _EMBED_BATCH_SIZE]))
+            if on_progress:
+                on_progress({"source": source, "embedded": len(vectors), "total": len(chunks)})
+        _check_cancel(cancel)
+        if len(vectors) != len(chunks):
+            raise RagLiteError(
+                f"Embedder returned {len(vectors)} vectors for {len(chunks)} chunks"
+            )
+
         stored_chunks = []
         for index, text_chunk in enumerate(chunks):
             metadata = ChunkMetadata(
                 source=source,
                 chunk=index + 1,
                 totalChunks=len(chunks),
+                # Only the keys that are known, so the stored JSON matches the TypeScript SDK's.
+                **chunk_location(layout, spans[index]),
             )
             chunk_id = f"{self.namespace}_{(index + 1):06d}"
             stored_chunks.append(
@@ -287,6 +322,10 @@ class Document:
                 )
             )
 
+        # Replace the old index only now, so a failed or cancelled build keeps it.
+        self._keyword_index = None
+        self.store.reset()
+        self.store.load()
         self.store.add(stored_chunks)
 
         dimensions = embedder.dimensions or (
@@ -438,6 +477,22 @@ class Document:
         generate_opts["context"] = context
 
         yield from stream_answer(generate_opts)
+
+    def as_tool(
+        self,
+        name: str = "search_documents",
+        description: Optional[str] = None,
+        top_k: Optional[int] = None,
+        mode: Optional[str] = None,
+    ) -> "SearchTool":
+        """A function-calling tool that searches this document.
+
+        Pass ``tool.openai_tool`` or ``tool.anthropic_tool`` in your request's tools;
+        when the model calls it, reply with ``tool(**arguments)``.
+        """
+        from ..tools import search_tool
+
+        return search_tool(self, name, description, top_k, mode)
 
     # TypeScript compatibility aliases
     def askStream(
@@ -673,3 +728,11 @@ def _explicit_chunking(options: Any) -> Dict[str, Optional[int]]:
 
 def _uses_retired_model(metadata: IndexMetadata) -> bool:
     return is_retired_embedding_model(metadata.embeddingProvider, metadata.embeddingModel)
+
+
+_EMBED_BATCH_SIZE = 64
+
+
+def _check_cancel(cancel: Optional[threading.Event]) -> None:
+    if cancel is not None and cancel.is_set():
+        raise BuildCancelledError("Build cancelled; the previous index was kept.")

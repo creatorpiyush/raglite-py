@@ -8,11 +8,8 @@ class PdfLoader(BaseLoader):
     def load(self) -> str:
         try:
             reader = PdfReader(self.file_path)
-            text_parts = []
-            for page in reader.pages:
-                text = page.extract_text()
-                if text:
-                    text_parts.append(text)
-            return "\n".join(text_parts).strip()
+            # Keep empty pages so page numbers stay right; they add only whitespace.
+            self.pages = [page.extract_text() or "" for page in reader.pages]
+            return "\n".join(self.pages).strip()
         except Exception as cause:
             raise LoaderError(f"Failed to load PDF: {self.file_path}", cause=cause)
