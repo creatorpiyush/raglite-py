@@ -104,3 +104,38 @@ def test_collection_fastapi_server_endpoints():
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
         shutil.rmtree(store_dir, ignore_errors=True)
+
+
+def test_collection_ask_and_ask_stream_reach_the_llm():
+    # Regression: both used to raise TypeError before calling the LLM.
+    temp_dir = tempfile.mkdtemp()
+    store_dir = tempfile.mkdtemp()
+    LocalEmbedder = __import__("raglite.embeddings.local", fromlist=["LocalEmbedder"]).LocalEmbedder
+    answer = {"text": "30 days.", "provider": "openai", "model": "m", "usage": {}, "finishReason": "stop"}
+    try:
+        (Path(temp_dir) / "policy.txt").write_text(SAMPLE1, encoding="utf-8")
+        with patch.object(LocalEmbedder, "embed_documents", side_effect=mock_embed_documents), patch.object(
+            LocalEmbedder, "embed_query", side_effect=mock_embed_query
+        ), patch("raglite.llm.answer._generate", return_value=answer) as gen, patch(
+            "raglite.llm.answer._stream", return_value=iter(["30 ", "days."])
+        ):
+            collection = DocumentCollection(
+                temp_dir,
+                options={
+                    "storeDir": store_dir,
+                    "logLevel": "silent",
+                    "llm": {"provider": "openai", "apiKey": "sk-test"},
+                },
+            )
+            collection.build()
+
+            result = collection.ask("Refund window?", {"systemHint": "Be brief."})
+            assert result.text == "30 days."
+            _, system_prompt, user_prompt = gen.call_args.args
+            assert system_prompt.endswith("Be brief.")
+            assert "Refunds are issued" in user_prompt
+
+            assert list(collection.ask_stream("Refund window?")) == ["30 ", "days."]
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        shutil.rmtree(store_dir, ignore_errors=True)

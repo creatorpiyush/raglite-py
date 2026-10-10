@@ -12,6 +12,7 @@ from ..constants import (
     PACKAGE_VERSION,
 )
 from ..embeddings import Embedder, create_embedder
+from ..embeddings.models import DEFAULT_EMBEDDING_MODELS, is_retired_embedding_model
 from ..errors import FileNotIndexedError, LoaderError, RagLiteError
 from ..llm import generate_answer, stream_answer
 from ..loaders import get_loader, is_url
@@ -168,14 +169,20 @@ class Document:
             c_size = existing.chunkSize if existing is not None else self.config.chunkSize
         if c_overlap is None:
             c_overlap = existing.overlap if existing is not None else self.config.overlap
+        retired = existing is not None and _uses_retired_model(existing)
+        requested_embeddings = embed_config
         # Likewise an unconfigured embedding provider keeps the existing
-        # index's provider and model rather than switching it to the local default.
+        # index's provider and model rather than switching it to the local
+        # default, unless the provider has shut that model down.
         if embed_config is None:
             embed_config = (
                 _query_embeddings_config(existing, self.config.embeddings)
                 if existing is not None
                 else self.config.embeddings
             )
+            if retired:
+                # Inherited a shut-down model: fall back to the provider's current default.
+                embed_config = embed_config.model_copy(update={"model": None})
         # Web pages change without their URL changing, so fingerprint the
         # fetched content rather than the URL.
         text: Optional[str] = self._inline_text
@@ -183,12 +190,30 @@ class Document:
             text = get_loader(self.file_path).load()
         source_hash = hash_string(text) if text is not None else hash_file(self.file_path)
 
+        # Re-embed an index built with a shut-down model unless that model was asked for explicitly.
+        keep_retired = (
+            retired
+            and existing is not None
+            and requested_embeddings is not None
+            and requested_embeddings.model == existing.embeddingModel
+        )
         reusable = (
             not should_rebuild
             and existing is not None
+            and (not retired or keep_retired)
             and self._cache_key_matches(existing, source_hash, c_size, c_overlap, embed_config)
         )
-        if reusable and index_format_version(existing) != INDEX_FORMAT_VERSION:
+        if existing is not None and retired and not keep_retired and not should_rebuild:
+            new_model = embed_config.model or DEFAULT_EMBEDDING_MODELS[embed_config.provider]
+            self.logger.warning(
+                f'Index was built with {existing.embeddingProvider} "{existing.embeddingModel}", '
+                f'which the provider has shut down. Re-embedding with "{new_model}".'
+            )
+        if (
+            reusable
+            and existing is not None
+            and index_format_version(existing) != INDEX_FORMAT_VERSION
+        ):
             # Format 2 only changed how unspaced scripts are chunked, so a
             # format-1 index of a source without such text is still exact:
             # upgrade it in place instead of paying to re-embed it.
@@ -268,7 +293,7 @@ class Document:
             len(vectors[0]) if vectors else 0
         )
         from datetime import timezone
-        metadata = IndexMetadata(
+        index_metadata = IndexMetadata(
             version=PACKAGE_VERSION,
             formatVersion=INDEX_FORMAT_VERSION,
             source=self.file_path,
@@ -281,8 +306,8 @@ class Document:
             chunkCount=len(chunks),
             createdAt=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         )
-        self.store.save_index_metadata(metadata)
-        self._save_keyword_index(KeywordIndex.build(stored_chunks), metadata)
+        self.store.save_index_metadata(index_metadata)
+        self._save_keyword_index(KeywordIndex.build(stored_chunks), index_metadata)
 
         self.embedder = embedder
         self.ready = True
@@ -445,11 +470,11 @@ class Document:
         return self.resolved_config
 
     @property
-    def vector_store(self) -> MemoryVectorStore:
+    def vector_store(self) -> VectorStore:
         return self.store
 
     @property
-    def vectorStore(self) -> MemoryVectorStore:
+    def vectorStore(self) -> VectorStore:
         return self.vector_store
 
     def serve(
@@ -477,6 +502,7 @@ class Document:
         )
 
     def _vector_search(self, query: str, top_k: int, score_threshold: float) -> List[SearchResult]:
+        assert self.embedder is not None  # set by build() or _ensure_ready()
         retriever = Retriever(self.embedder, self.store)
         return retriever.retrieve(query, top_k=top_k, score_threshold=score_threshold)
 
@@ -545,6 +571,12 @@ class Document:
                 f'No RagLite index found for "{self.file_path}". Call build() first.'
             )
 
+        if _uses_retired_model(existing):
+            raise RagLiteError(
+                f'The index for "{self.file_path}" was built with {existing.embeddingProvider} '
+                f'"{existing.embeddingModel}", which the provider has shut down. '
+                "Call build() to re-index it with the current default model."
+            )
         if self.embedder is None:
             self.embedder = create_embedder(
                 _query_embeddings_config(existing, self.config.embeddings)
@@ -637,3 +669,7 @@ def _explicit_chunking(options: Any) -> Dict[str, Optional[int]]:
     opts = options if isinstance(options, dict) else {}
     size = opts.get("chunkSize", opts.get("chunk_size"))
     return {"chunkSize": size, "overlap": opts.get("overlap")}
+
+
+def _uses_retired_model(metadata: IndexMetadata) -> bool:
+    return is_retired_embedding_model(metadata.embeddingProvider, metadata.embeddingModel)

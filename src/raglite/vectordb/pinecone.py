@@ -70,10 +70,7 @@ class PineconeVectorStore(VectorStore):
             {
                 "id": c.id,
                 "values": c.embedding,
-                "metadata": {
-                    "text": c.text,
-                    **c.metadata.model_dump(by_alias=True),
-                },
+                "metadata": dict(c.metadata.model_dump(by_alias=True), text=c.text),
             }
             for c in chunks
         ]

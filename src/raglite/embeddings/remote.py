@@ -123,10 +123,15 @@ class RemoteEmbedder(Embedder):
             cohere = import_optional("cohere", "cohere", purpose)
 
             key = apiKey or os.environ.get("COHERE_API_KEY")
-            co = cohere.Client(api_key=key, base_url=baseURL)
+            co = cohere.ClientV2(api_key=key, base_url=baseURL)
             input_type = "search_query" if is_query else "search_document"
-            resp = co.embed(texts=texts, model=self.model, input_type=input_type)
-            return resp.embeddings
+            resp = co.embed(
+                texts=texts,
+                model=self.model,
+                input_type=input_type,
+                embedding_types=["float"],
+            )
+            return resp.embeddings.float_
 
         elif p == "mistral":
             from ..llm.factory import mistral_client_class

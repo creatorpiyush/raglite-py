@@ -35,6 +35,9 @@ jobs:
       - name: Check code style (ruff)
         run: python -m ruff check .
 
+      - name: Type check (mypy)
+        run: python -m mypy src/ scripts/smoke_providers.py --ignore-missing-imports
+
       - name: Run tests
         run: python -m pytest tests/ -q
 

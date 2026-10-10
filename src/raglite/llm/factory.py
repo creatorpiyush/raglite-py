@@ -94,7 +94,7 @@ def build_language_client(provider: LLMProviderName, config: LLMProviderConfig) 
         cohere = import_optional("cohere", "cohere", purpose)
 
         key = apiKey or os.environ.get("COHERE_API_KEY")
-        return cohere.Client(api_key=key, base_url=baseURL)
+        return cohere.ClientV2(api_key=key, base_url=baseURL)
 
     elif provider == "groq":
         OpenAI = import_optional("openai", "groq", purpose).OpenAI

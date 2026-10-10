@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.0.1] - 2026-10-10
+
+### Fixed
+- **`DocumentCollection.ask()` and `ask_stream()` always failed** with `TypeError: generate_answer() got an unexpected keyword argument 'include_citations'`. They now answer, and pass `systemHint` and `includeCitations` through like `Document.ask()`.
+- **Cohere uses the v2 API** (`cohere.ClientV2`) for chat, streaming and embeddings. The v1 `chat(message=, preamble=)` call is the legacy API. The `[cohere]` extra now requires `cohere>=5.11.0`.
+- **Indexes built with a shut-down embedding model:** `build()` now re-embeds an index built with a model the provider has shut down (Google `text-embedding-004` and `embedding-001`) using the provider's current default, and logs a warning. Previously it reused the index, and every search then failed at the provider. Searching such an index without `build()` raises an error that says to call `build()`. Passing the old model explicitly in `embeddings` still keeps the index.
+- **Type errors:** fixed all 20 mypy errors. Pinecone metadata now always stores the chunk text under `text`, even if chunk metadata has a `text` key.
+
+### Added
+- **Provider smoke test:** `python scripts/smoke_providers.py` makes one embedding call and one answer per provider with the default models, for every provider whose API key is set (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, `MISTRAL_API_KEY`, `COHERE_API_KEY`, `GROQ_API_KEY`, `XAI_API_KEY`, `VOYAGE_API_KEY`, `OLLAMA_BASE_URL`), and exits 1 if any fails. The "Provider Smoke Test" GitHub workflow runs it on demand with repository secrets.
+
+### Internal
+- mypy now fails CI and the pre-commit and pre-release scripts; `mypy` is part of the `dev` extra.
+
 ## [2.0.0] - 2026-10-10
 
 ### Breaking changes
