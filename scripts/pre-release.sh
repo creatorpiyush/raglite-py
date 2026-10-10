@@ -18,7 +18,7 @@ echo "2. Checking code style and formatting (ruff)..."
 $PYTHON -m ruff check .
 
 echo "3. Running typechecks (mypy)..."
-$PYTHON -m mypy src/ --ignore-missing-imports --no-error-summary || true
+$PYTHON -m mypy src/ scripts/smoke_providers.py --ignore-missing-imports
 
 echo "4. Running full test suite..."
 $PYTHON -m pytest tests/ -q

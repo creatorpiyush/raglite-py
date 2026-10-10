@@ -171,3 +171,61 @@ class TestDocumentFromText:
     def test_rejects_empty_text(self, tmp_dir):
         with pytest.raises(LoaderError):
             Document.from_text("empty", "", {"storeDir": tmp_dir}).build()
+
+
+class TestRetiredEmbeddingModel:
+    """Indexes built with an embedding model the provider has shut down."""
+
+    def _retired_index(self, tmp_dir, sample_txt):
+        import json
+
+        opts = {"storeDir": tmp_dir, "chunkSize": 20, "overlap": 5, "logLevel": "silent"}
+        doc = Document(sample_txt, opts)
+        doc.build()
+        # Pretend it was built with Google's text-embedding-004, which Google has shut down.
+        meta_path = os.path.join(tmp_dir, doc.namespace, "metadata.json")
+        with open(meta_path) as f:
+            meta = json.load(f)
+        meta.update(embeddingProvider="google", embeddingModel="text-embedding-004")
+        with open(meta_path, "w") as f:
+            json.dump(meta, f)
+        return opts
+
+    def _patched(self):
+        LocalEmbedder = __import__("raglite.embeddings.local", fromlist=["LocalEmbedder"]).LocalEmbedder
+        return (
+            patch.object(LocalEmbedder, "embed_documents", side_effect=mock_embed_documents),
+            patch.object(LocalEmbedder, "embed_query", side_effect=mock_embed_query),
+        )
+
+    def test_search_without_build_explains_how_to_fix_it(self, tmp_dir, sample_txt):
+        from raglite.errors import RagLiteError
+
+        docs, query = self._patched()
+        with docs, query:
+            opts = self._retired_index(tmp_dir, sample_txt)
+            with pytest.raises(RagLiteError, match=r"shut down.*Call build\(\)"):
+                Document(sample_txt, opts).search("word1")
+
+    def test_build_re_embeds_with_the_current_default(self, tmp_dir, sample_txt):
+        docs, query = self._patched()
+        with docs as embed_documents, query:
+            opts = self._retired_index(tmp_dir, sample_txt)
+            embed_documents.reset_mock()
+            # Default provider is local; the retired index's provider is google, so pass google
+            # without a model and stub its embedder.
+            from raglite.embeddings.remote import RemoteEmbedder
+
+            with patch.object(RemoteEmbedder, "embed_documents", side_effect=mock_embed_documents) as remote:
+                result = Document(sample_txt, opts).build()
+            assert result["cached"] is False
+            assert result["embeddingModel"] == "gemini-embedding-2"
+            assert remote.call_count == 1
+
+    def test_build_keeps_the_index_when_that_model_is_requested(self, tmp_dir, sample_txt):
+        docs, query = self._patched()
+        with docs, query:
+            opts = self._retired_index(tmp_dir, sample_txt)
+            embeddings = {"provider": "google", "model": "text-embedding-004", "apiKey": "k"}
+            result = Document(sample_txt, {**opts, "embeddings": embeddings}).build()
+            assert result["cached"] is True

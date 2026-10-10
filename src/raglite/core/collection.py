@@ -33,7 +33,7 @@ class DocumentCollection:
 
     def __init__(
         self,
-        sources: Union[str, Path, List[Union[str, Path]]] = None,
+        sources: Optional[Union[str, Path, List[Union[str, Path]]]] = None,
         options: Optional[Union[DocumentOptions, Dict[str, Any]]] = None,
     ):
         self.options = options or {}
@@ -118,11 +118,11 @@ class DocumentCollection:
                     doc = Document(file_path, self.options)
                     self.documents[file_path] = doc
 
-                res = doc.build(options, rebuild=should_rebuild)
-                chunk_count = res.get("chunkCount", 0)
+                built = doc.build(options, rebuild=should_rebuild)
+                chunk_count = built.get("chunkCount", 0)
                 total_chunks += chunk_count
 
-                if res.get("cached", False):
+                if built.get("cached", False):
                     cached_docs += 1
                 else:
                     new_docs += 1
@@ -229,13 +229,7 @@ class DocumentCollection:
         if not context:
             raise RagLiteError("No relevant context found in document collection to answer question.")
 
-        return generate_answer(
-            llm_config=llm_config,
-            question=question,
-            context=context,
-            include_citations=opts.get("includeCitations", opts.get("include_citations", True)),
-            system_hint=opts.get("systemHint", opts.get("system_hint")),
-        )
+        return generate_answer({**opts, "llm": llm_config, "question": question, "context": context})
 
     def ask_stream(self, question: str, options: Optional[Dict[str, Any]] = None) -> Generator[str, None, None]:
         """Stream LLM response over retrieved collection context."""
@@ -250,13 +244,7 @@ class DocumentCollection:
         if not context:
             raise RagLiteError("No relevant context found in document collection to answer question.")
 
-        yield from stream_answer(
-            llm_config=llm_config,
-            question=question,
-            context=context,
-            include_citations=opts.get("includeCitations", opts.get("include_citations", True)),
-            system_hint=opts.get("systemHint", opts.get("system_hint")),
-        )
+        yield from stream_answer({**opts, "llm": llm_config, "question": question, "context": context})
 
     def serve(
         self,

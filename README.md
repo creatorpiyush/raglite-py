@@ -432,6 +432,9 @@ pytest
 # Run with coverage
 pytest --cov=raglite --cov-report=term-missing
 
+# Live call per provider whose API key is set (see the script for the variables)
+python scripts/smoke_providers.py
+
 # Run examples
 python examples/basic.py
 python examples/serve.py

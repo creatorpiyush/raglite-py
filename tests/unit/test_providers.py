@@ -133,3 +133,58 @@ def test_anthropic_configured_temperature_goes_in_extra_body():
     client.messages.create.return_value.content = []
     _generate(_anthropic_llm(client, temperature=0.2), "sys", "user")
     assert client.messages.create.call_args.kwargs["extra_body"] == {"temperature": 0.2}
+
+
+def _cohere_llm(client):
+    return ResolvedLLM("cohere", "command-a-03-2025", client, temperature=0.0)
+
+
+def test_cohere_generate_uses_v2_chat():
+    client = MagicMock()
+    resp = client.chat.return_value
+    resp.message.content = [types.SimpleNamespace(type="text", text="Hi.")]
+    resp.usage.tokens = types.SimpleNamespace(input_tokens=3.0, output_tokens=2.0)
+    resp.finish_reason = "COMPLETE"
+
+    out = _generate(_cohere_llm(client), "sys", "user")
+
+    kwargs = client.chat.call_args.kwargs
+    assert kwargs["messages"] == [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "user"},
+    ]
+    assert out["text"] == "Hi."
+    assert out["usage"] == {"promptTokens": 3, "completionTokens": 2, "totalTokens": 5}
+    assert out["finishReason"] == "COMPLETE"
+
+
+def test_cohere_stream_yields_content_deltas():
+    def delta(text):
+        content = types.SimpleNamespace(text=text)
+        return types.SimpleNamespace(
+            type="content-delta",
+            delta=types.SimpleNamespace(message=types.SimpleNamespace(content=content)),
+        )
+
+    client = MagicMock()
+    client.chat_stream.return_value = [
+        types.SimpleNamespace(type="message-start", delta=None),
+        delta("Hel"),
+        delta("lo"),
+        types.SimpleNamespace(type="message-end", delta=None),
+    ]
+    assert list(_stream(_cohere_llm(client), "sys", "user")) == ["Hel", "lo"]
+
+
+def test_cohere_embeddings_use_v2_float_embeddings(monkeypatch):
+    client = MagicMock()
+    client.embed.return_value.embeddings.float_ = [[3.0, 4.0]]
+    cohere = types.SimpleNamespace(ClientV2=MagicMock(return_value=client))
+    monkeypatch.setitem(sys.modules, "cohere", cohere)
+
+    embedder = RemoteEmbedder.create(EmbeddingProviderConfig(provider="cohere", apiKey="k"))
+
+    assert embedder.embed_query("q") == [0.6, 0.8]
+    kwargs = client.embed.call_args.kwargs
+    assert kwargs["input_type"] == "search_query"
+    assert kwargs["embedding_types"] == ["float"]

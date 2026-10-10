@@ -5,7 +5,7 @@ LogLevel = Literal["silent", "info", "debug"]
 
 
 class Logger:
-    def __init__(self, level: LogLevel = "info"):
+    def __init__(self, level: str = "info"):
         self.level = level
 
     def _should_log(self, target: LogLevel) -> bool:
@@ -38,7 +38,7 @@ class Logger:
             print(f"[raglite] {message}{suffix}", file=sys.stderr)
 
 
-def create_logger(level: LogLevel = "info") -> Logger:
+def create_logger(level: str = "info") -> Logger:
     return Logger(level)
 
 

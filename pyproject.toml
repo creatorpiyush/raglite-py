@@ -8,7 +8,7 @@ packages = ["src/raglite"]
 
 [project]
 name = "raglite-toolkit"
-version = "2.0.0"
+version = "2.0.1"
 description = "Build semantic search, multi-provider question answering, and REST APIs over your documents in a few lines of Python."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -58,7 +58,7 @@ xai = ["openai>=1.0.0"]
 ollama = ["openai>=1.0.0"]
 anthropic = ["anthropic>=0.18.0"]
 google = ["google-genai>=1.0.0"]
-cohere = ["cohere>=5.0.0"]
+cohere = ["cohere>=5.11.0"]  # ClientV2 (v2 chat and embed)
 mistral = ["mistralai>=1.0.0"]
 voyage = ["voyageai>=0.1.0"]
 local = ["sentence-transformers>=2.2.0"]
@@ -72,6 +72,7 @@ dev = [
     "build>=1.0.0",
     "twine>=5.0.0",
     "ruff>=0.4.0",
+    "mypy>=1.10",
     "raglite-toolkit[openai]",  # tests build real OpenAI-compatible clients
 ]
 

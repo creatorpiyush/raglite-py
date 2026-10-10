@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from typing import Callable, Dict
 
 from ..errors import UnsupportedFileTypeError
 from .base import BaseLoader
@@ -11,7 +12,7 @@ from .pdf import PdfLoader
 from .txt import TxtLoader
 from .web import WebLoader
 
-LOADERS = {
+LOADERS: Dict[str, Callable[[str], BaseLoader]] = {
     ".pdf": PdfLoader,
     ".txt": TxtLoader,
     ".json": JsonLoader,

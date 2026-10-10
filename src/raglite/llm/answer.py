@@ -154,32 +154,22 @@ def _generate(llm: ResolvedLLM, system_prompt: str, user_prompt: str) -> dict:
         }
 
     elif p == "cohere":
-        params = {
-            "model": llm.model,
-            "preamble": system_prompt,
-            "message": user_prompt,
-            "temperature": llm.temperature,
-        }
-        if llm.max_tokens is not None:
-            params["max_tokens"] = llm.max_tokens
-        resp = llm.client.chat(**params)
+        resp = llm.client.chat(**_cohere_params(llm, system_prompt, user_prompt))
         usage = {}
-        if resp.meta and resp.meta.tokens:
+        tokens = resp.usage.tokens if resp.usage else None
+        if tokens and tokens.input_tokens is not None and tokens.output_tokens is not None:
             usage = {
-                "promptTokens": resp.meta.tokens.input_tokens,
-                "completionTokens": resp.meta.tokens.output_tokens,
-                "totalTokens": resp.meta.tokens.input_tokens
-                + resp.meta.tokens.output_tokens,
+                "promptTokens": int(tokens.input_tokens),
+                "completionTokens": int(tokens.output_tokens),
+                "totalTokens": int(tokens.input_tokens + tokens.output_tokens),
             }
-        finish_reason = None
-        if hasattr(resp, "finish_reason"):
-            finish_reason = resp.finish_reason
+        content = resp.message.content if resp.message else None
         return {
-            "text": resp.text,
+            "text": "".join(c.text for c in (content or []) if c.type == "text"),
             "provider": llm.provider,
             "model": llm.model,
             "usage": usage,
-            "finishReason": finish_reason,
+            "finishReason": resp.finish_reason,
         }
 
     elif p == "mistral":
@@ -257,18 +247,13 @@ def _stream(llm: ResolvedLLM, system_prompt: str, user_prompt: str) -> Generator
                 yield chunk.text
 
     elif p == "cohere":
-        params = {
-            "model": llm.model,
-            "preamble": system_prompt,
-            "message": user_prompt,
-            "temperature": llm.temperature,
-        }
-        if llm.max_tokens is not None:
-            params["max_tokens"] = llm.max_tokens
-        resp = llm.client.chat_stream(**params)
-        for event in resp:
-            if event.event_type == "text-generation":
-                yield event.text
+        for event in llm.client.chat_stream(**_cohere_params(llm, system_prompt, user_prompt)):
+            if event.type != "content-delta":
+                continue
+            message = event.delta.message if event.delta else None
+            text = message.content.text if message and message.content else None
+            if text:
+                yield text
 
     elif p == "mistral":
         params = {
@@ -312,3 +297,18 @@ def _anthropic_options(llm: ResolvedLLM, params: dict) -> None:
     params["max_tokens"] = llm.max_tokens if llm.max_tokens is not None else 16000
     if llm.temperature is not None:
         params["extra_body"] = {"temperature": llm.temperature}
+
+
+def _cohere_params(llm: ResolvedLLM, system_prompt: str, user_prompt: str) -> dict:
+    """Chat arguments for the Cohere v2 client."""
+    params = {
+        "model": llm.model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        "temperature": llm.temperature,
+    }
+    if llm.max_tokens is not None:
+        params["max_tokens"] = llm.max_tokens
+    return params
