@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.1.1] - 2026-10-10
+
+### Added
+- **Documentation site:** https://creatorpiyush.github.io/raglite/ covers both SDKs, with TypeScript and Python tabs on every sample: getting started, providers, troubleshooting, guides and an options reference. `Homepage` and `Documentation` in the package metadata now point to it.
+
+### Fixed
+- **Folders no longer index hidden files, hidden folders or `node_modules`**, matching the TypeScript SDK. Previously a `.raglite` index store, `.venv` or `.git` inside an indexed folder was indexed too, including the index's own JSON files.
+
+### Changed
+- The README is now a short introduction with links to the documentation, so PyPI shows the docs link. Nothing was removed without a matching docs page.
+- The README no longer says collections accept glob patterns; they never expanded them. Pass a folder or a list of files.
+
 ## [2.1.0] - 2026-10-10
 
 ### Added
