@@ -49,15 +49,38 @@ class RetrievalCandidates:
 
 
 class Document:
+    @classmethod
+    def from_text(
+        cls,
+        id: str,
+        text: str,
+        options: Optional[Union[DocumentOptions, Dict[str, Any]]] = None,
+    ) -> "Document":
+        """Index text you already have (a DB row, an upload, CMS content) without a file.
+
+        ``id`` names the index: reuse the same id to reuse it, and changed text is
+        re-indexed on the next build(). ``id`` is also the chunks' ``source``.
+        """
+        return cls(id, options, _text=text)
+
     def __init__(
         self,
         file_path: str,
         options: Optional[Union[DocumentOptions, Dict[str, Any]]] = None,
+        *,
+        _text: Optional[str] = None,
     ):
-        self.file_path = file_path if is_url(file_path) else os.path.abspath(file_path)
+        # Set by from_text(): indexed instead of reading file_path.
+        self._inline_text = _text
+        if _text is not None or is_url(file_path):
+            self.file_path = file_path
+        else:
+            self.file_path = os.path.abspath(file_path)
         self.config: ResolvedConfig = resolve_config(options)
         self.logger = create_logger(self.config.logLevel)
-        self.namespace = namespace_from_path(self.file_path)
+        self.namespace = namespace_from_path(
+            f"text:{file_path}" if _text is not None else self.file_path
+        )
 
         # Resolve vector store — options may provide a VectorStore instance directly,
         # a VectorStoreProviderConfig dict/object, or fall back to the in-memory default.
@@ -129,7 +152,11 @@ class Document:
         if should_rebuild is None:
             should_rebuild = opts.get("rebuild", False)
 
-        if not is_url(self.file_path) and not os.path.exists(self.file_path):
+        if (
+            self._inline_text is None
+            and not is_url(self.file_path)
+            and not os.path.exists(self.file_path)
+        ):
             raise LoaderError(f"File does not exist: {self.file_path}")
 
         self.store.load()
@@ -151,8 +178,8 @@ class Document:
             )
         # Web pages change without their URL changing, so fingerprint the
         # fetched content rather than the URL.
-        text: Optional[str] = None
-        if is_url(self.file_path):
+        text: Optional[str] = self._inline_text
+        if text is None and is_url(self.file_path):
             text = get_loader(self.file_path).load()
         source_hash = hash_string(text) if text is not None else hash_file(self.file_path)
 
@@ -215,7 +242,7 @@ class Document:
 
         source = (
             self.file_path
-            if is_url(self.file_path)
+            if self._inline_text is not None or is_url(self.file_path)
             else os.path.basename(self.file_path)
         )
         stored_chunks = []

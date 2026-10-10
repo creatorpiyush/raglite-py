@@ -1,7 +1,7 @@
 import os
 from typing import Any, Optional, Union
 
-from ..errors import LLMError
+from ..errors import LLMError, import_optional
 from ..types import LLMProviderConfig, LLMProviderName
 from .models import DEFAULT_LLM_MODELS
 
@@ -12,7 +12,7 @@ class ResolvedLLM:
         provider: LLMProviderName,
         model: str,
         client: Any,
-        temperature: float,
+        temperature: Optional[float],
         max_tokens: Optional[int] = None,
     ):
         self.provider = provider
@@ -27,7 +27,11 @@ def create_llm(config: Union[LLMProviderConfig, dict]) -> ResolvedLLM:
     if isinstance(config, dict):
         config = LLMProviderConfig.model_validate(config)
     model = config.model or DEFAULT_LLM_MODELS[config.provider]
-    temperature = config.temperature if config.temperature is not None else 0.0
+    # Claude 5 models reject non-default sampling values, so Anthropic gets no
+    # temperature unless one is configured.
+    temperature = config.temperature
+    if temperature is None and config.provider != "anthropic":
+        temperature = 0.0
     max_tokens = config.maxTokens
 
     client = build_language_client(config.provider, config)
@@ -41,19 +45,28 @@ def create_llm(config: Union[LLMProviderConfig, dict]) -> ResolvedLLM:
     )
 
 
+def mistral_client_class(purpose: str) -> Any:
+    """`Mistral` lives at the top level in mistralai 1.x and in `mistralai.client` in 2.x and later."""
+    module = import_optional("mistralai", "mistral", purpose)
+    if hasattr(module, "Mistral"):
+        return module.Mistral
+    return import_optional("mistralai.client", "mistral", purpose).Mistral
+
+
 def build_language_client(provider: LLMProviderName, config: LLMProviderConfig) -> Any:
     apiKey = config.apiKey
     baseURL = config.baseURL
+    purpose = f'The "{provider}" LLM provider'
 
     if provider == "openai":
-        from openai import OpenAI
+        OpenAI = import_optional("openai", "openai", purpose).OpenAI
 
         return OpenAI(
             api_key=apiKey or os.environ.get("OPENAI_API_KEY"), base_url=baseURL
         )
 
     elif provider == "anthropic":
-        from anthropic import Anthropic
+        Anthropic = import_optional("anthropic", "anthropic", purpose).Anthropic
 
         return Anthropic(
             api_key=apiKey or os.environ.get("ANTHROPIC_API_KEY"),
@@ -61,30 +74,30 @@ def build_language_client(provider: LLMProviderName, config: LLMProviderConfig) 
         )
 
     elif provider == "google":
-        import google.generativeai as genai
+        genai = import_optional("google.genai", "google", purpose)
 
         key = (
             apiKey
             or os.environ.get("GEMINI_API_KEY")
             or os.environ.get("GOOGLE_API_KEY")
         )
-        genai.configure(api_key=key)
-        return genai
+        http_options = {"base_url": baseURL} if baseURL else None
+        return genai.Client(api_key=key, http_options=http_options)
 
     elif provider == "mistral":
-        from mistralai import Mistral
+        Mistral = mistral_client_class(purpose)
 
         key = apiKey or os.environ.get("MISTRAL_API_KEY")
         return Mistral(api_key=key, server_url=baseURL)
 
     elif provider == "cohere":
-        import cohere
+        cohere = import_optional("cohere", "cohere", purpose)
 
         key = apiKey or os.environ.get("COHERE_API_KEY")
         return cohere.Client(api_key=key, base_url=baseURL)
 
     elif provider == "groq":
-        from openai import OpenAI
+        OpenAI = import_optional("openai", "groq", purpose).OpenAI
 
         base = (
             baseURL
@@ -95,7 +108,7 @@ def build_language_client(provider: LLMProviderName, config: LLMProviderConfig) 
         return OpenAI(api_key=key, base_url=base)
 
     elif provider == "xai":
-        from openai import OpenAI
+        OpenAI = import_optional("openai", "xai", purpose).OpenAI
 
         base = (
             baseURL or os.environ.get("XAI_BASE_URL") or "https://api.x.ai/v1"
@@ -104,7 +117,7 @@ def build_language_client(provider: LLMProviderName, config: LLMProviderConfig) 
         return OpenAI(api_key=key, base_url=base)
 
     elif provider == "ollama":
-        from openai import OpenAI
+        OpenAI = import_optional("openai", "ollama", purpose).OpenAI
 
         raw = (baseURL or "http://localhost:11434").rstrip("/")
         base = raw if raw.endswith("/v1") else f"{raw}/v1"

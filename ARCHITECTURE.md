@@ -9,12 +9,13 @@ This document details the software architecture, component design, data flow, an
 `raglite-toolkit` is a Python-native Retrieval-Augmented Generation library built with Pydantic v2 and FastAPI. It provides zero-boilerplate semantic search, multi-provider LLM response synthesis, and self-hosted REST APIs over local files.
 
 ### Key Characteristics
-* **Python-Native & Type-Annotated**: Modern Python 3.10+ typing with Pydantic v2 model validation and camelCase alias serialization.
+* **Python-Native & Type-Annotated**: Modern Python 3.11+ typing with Pydantic v2 model validation and camelCase alias serialization.
 * **1:1 Parity with TypeScript SDK**: Identical function signatures, option dictionaries, data models, and `.raglite/` persistence layout.
 * **Pluggable & Extensible**: Modular Abstract Base Classes (ABCs) for Loaders, Chunkers, Embeddings, Vector Databases, and LLMs.
 * **Per-Document Isolation**: Namespaced vector collections tied to source document path/identity.
 * **SHA-256 Content Caching**: Automatically skips re-embedding if document content has not changed.
-* **Offline-First Option**: Local offline embeddings via `sentence-transformers` (`all-MiniLM-L6-v2`) and local LLMs via Ollama.
+* **Small Core, Optional Providers**: Provider SDKs (`openai`, `anthropic`, `google-genai`, `cohere`, `mistralai`, `voyageai`) and `sentence-transformers` are optional extras (`pip install 'raglite-toolkit[openai,local]'`). They are imported on first use; a missing one becomes a `ConfigError` naming the `pip install` command (`import_optional()` in `errors.py`).
+* **Offline-First Option**: Local offline embeddings via `sentence-transformers` (`all-MiniLM-L6-v2`, the `[local]` extra) and local LLMs via Ollama.
 
 ---
 
@@ -37,7 +38,7 @@ raglite-py/src/raglite/
 │   ├── __init__.py
 │   ├── base.py
 │   ├── factory.py
-│   ├── local.py      # sentence-transformers (offline)
+│   ├── local.py      # sentence-transformers (offline, [local] extra)
 │   ├── models.py
 │   └── remote.py     # OpenAI, Gemini, Mistral, Cohere, Voyage, Ollama
 ├── llm/             # LLM provider factory & prompt synthesis
@@ -67,7 +68,7 @@ raglite-py/src/raglite/
 ├── cli.py           # Command-line interface tool (Typer/Argparse)
 ├── config.py        # Environment & default configuration
 ├── constants.py     # System constants & defaults
-├── errors.py        # Custom RAGLite exception definitions
+├── errors.py        # Custom RAGLite exception definitions + import_optional()
 ├── types.py         # Pydantic v2 data models & type aliases
 └── utils/           # Utility functions (hashing, math, crypto)
 ```
@@ -124,7 +125,7 @@ graph TD
 ## 4. End-to-End Data Pipeline
 
 ### 4.1 Ingestion & Indexing
-1. `doc.build()` invokes the appropriate `BaseLoader` based on file extension (`.pdf`, `.txt`, `.json`, `.md`, `.docx`).
+1. `doc.build()` invokes the appropriate `BaseLoader` based on file extension (`.pdf`, `.txt`, `.json`, `.md`, `.docx`). A document made with `Document.from_text(id, text)` skips the loader and uses the given text; its namespace is derived from `text:<id>` (same as the TypeScript SDK), and `id` is the chunks' `source`.
 2. Calculates SHA-256 hash of raw document content.
 3. Checks existing `IndexMetadata` in `VectorStore`. The cached index is reused when the index format version, content hash, chunk size, overlap and embedding provider/model all match (URL sources are hashed by their fetched text).
 4. If hash differs or force rebuild requested:

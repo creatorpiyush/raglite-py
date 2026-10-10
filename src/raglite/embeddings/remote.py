@@ -2,7 +2,7 @@ import math
 import os
 from typing import List, Optional
 
-from ..errors import EmbeddingError
+from ..errors import ConfigError, EmbeddingError, import_optional
 from ..types import EmbeddingProviderConfig, EmbeddingProviderName
 from .base import Embedder
 from .models import DEFAULT_EMBEDDING_MODELS
@@ -62,6 +62,8 @@ class RemoteEmbedder(Embedder):
             if self._dimensions is None and normalized:
                 self._dimensions = len(normalized[0])
             return normalized
+        except ConfigError:
+            raise
         except Exception as cause:
             raise EmbeddingError(
                 f"Failed to embed {len(texts)} document(s) via {self.provider}",
@@ -77,6 +79,8 @@ class RemoteEmbedder(Embedder):
             if self._dimensions is None:
                 self._dimensions = len(normalized)
             return normalized
+        except ConfigError:
+            raise
         except Exception as cause:
             raise EmbeddingError(
                 f"Failed to embed query via {self.provider}", cause=cause
@@ -86,9 +90,10 @@ class RemoteEmbedder(Embedder):
         p = self.provider
         apiKey = self._config.apiKey
         baseURL = self._config.baseURL
+        purpose = f'The "{p}" embedding provider'
 
         if p == "openai":
-            from openai import OpenAI
+            OpenAI = import_optional("openai", "openai", purpose).OpenAI
 
             client = OpenAI(
                 api_key=apiKey or os.environ.get("OPENAI_API_KEY"), base_url=baseURL
@@ -97,29 +102,25 @@ class RemoteEmbedder(Embedder):
             return [data.embedding for data in resp.data]
 
         elif p == "google":
-            import google.generativeai as genai
+            genai = import_optional("google.genai", "google", purpose)
 
             key = (
                 apiKey
                 or os.environ.get("GEMINI_API_KEY")
                 or os.environ.get("GOOGLE_API_KEY")
             )
-            genai.configure(api_key=key)
-            model_name = self.model
-            if not model_name.startswith("models/"):
-                model_name = f"models/{model_name}"
-            resp = genai.embed_content(model=model_name, contents=texts)
-            embeddings = resp.get("embedding")
-            if not embeddings:
+            http_options = {"base_url": baseURL} if baseURL else None
+            client = genai.Client(api_key=key, http_options=http_options)
+            resp = client.models.embed_content(model=self.model, contents=texts)
+            embeddings = [list(e.values) for e in (resp.embeddings or [])]
+            if len(embeddings) != len(texts):
                 raise ValueError(
-                    f"Google API returned empty embedding response: {resp}"
+                    f"Google API returned {len(embeddings)} embeddings for {len(texts)} texts"
                 )
-            if embeddings and not isinstance(embeddings[0], list):
-                embeddings = [embeddings]
             return embeddings
 
         elif p == "cohere":
-            import cohere
+            cohere = import_optional("cohere", "cohere", purpose)
 
             key = apiKey or os.environ.get("COHERE_API_KEY")
             co = cohere.Client(api_key=key, base_url=baseURL)
@@ -128,7 +129,9 @@ class RemoteEmbedder(Embedder):
             return resp.embeddings
 
         elif p == "mistral":
-            from mistralai import Mistral
+            from ..llm.factory import mistral_client_class
+
+            Mistral = mistral_client_class(purpose)
 
             key = apiKey or os.environ.get("MISTRAL_API_KEY")
             client = Mistral(api_key=key, server_url=baseURL)
@@ -136,7 +139,7 @@ class RemoteEmbedder(Embedder):
             return [data.embedding for data in resp.data]
 
         elif p == "voyage":
-            import voyageai
+            voyageai = import_optional("voyageai", "voyage", purpose)
 
             key = apiKey or os.environ.get("VOYAGE_API_KEY")
             vo = voyageai.Client(api_key=key)
@@ -145,7 +148,7 @@ class RemoteEmbedder(Embedder):
             return resp.embeddings
 
         elif p == "ollama":
-            from openai import OpenAI
+            OpenAI = import_optional("openai", "ollama", purpose).OpenAI
 
             raw = (baseURL or "http://localhost:11434").rstrip("/")
             base = raw if raw.endswith("/v1") else f"{raw}/v1"

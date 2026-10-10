@@ -1,3 +1,7 @@
+import importlib
+from types import ModuleType
+
+
 class RagLiteError(Exception):
     """Base error for the RAGLite toolkit."""
     def __init__(self, message: str, cause: Exception | None = None):
@@ -45,3 +49,15 @@ class LLMError(RagLiteError):
 class ConfigError(RagLiteError):
     """Raised when configuration values are invalid."""
     pass
+
+
+def import_optional(module: str, extra: str, purpose: str) -> ModuleType:
+    """Import an optional dependency, or raise ConfigError naming the extra to install."""
+    try:
+        return importlib.import_module(module)
+    except ModuleNotFoundError as cause:
+        raise ConfigError(
+            f"{purpose} requires the raglite-toolkit[{extra}] extra. "
+            f"Install it with: pip install 'raglite-toolkit[{extra}]'",
+            cause=cause,
+        ) from cause

@@ -25,17 +25,17 @@
 
 ## Install
 
-```bash
-pip install raglite-toolkit
-```
+Requires Python 3.11 or later.
 
-For **local offline embeddings** (no API key required):
+The core install is small. Add an extra for each provider you use; the [Supported Providers](#supported-providers) tables list the extra for each one:
 
 ```bash
-pip install raglite-toolkit sentence-transformers
+pip install 'raglite-toolkit[openai,anthropic]'   # OpenAI embeddings + Claude answers
+pip install 'raglite-toolkit[local]'              # local offline embeddings (the default), no API key
+pip install 'raglite-toolkit[all]'                # every provider
 ```
 
-> `sentence-transformers` is included by default. The `all-MiniLM-L6-v2` model (~90 MB) is downloaded automatically on first use.
+If an extra is missing, RAGLite raises a `ConfigError` that names the `pip install` command to run. The `local` extra installs `sentence-transformers` (with PyTorch); the `all-MiniLM-L6-v2` model (~90 MB) is downloaded on first use.
 
 ---
 
@@ -55,6 +55,17 @@ hits = doc.search("refund policy", top_k=3)
 
 answer = doc.ask("What is the refund policy?")
 print(answer.text)
+```
+
+---
+
+## Index Text You Already Have
+
+No file needed: index a database row, an upload or CMS content with `Document.from_text(id, text)`. The `id` names the index (reuse it to reuse the index) and becomes each chunk's `source`. Changed text is re-indexed on the next `build()`.
+
+```python
+doc = Document.from_text("faq-42", faq_text, {"embeddings": {"provider": "openai"}})
+doc.build()
 ```
 
 ---
@@ -122,6 +133,8 @@ There is no stemming or stopword list, because both are language-specific: in ke
 
 ## Fully Offline — No API Key Needed
 
+Install `pip install 'raglite-toolkit[local,ollama]'`, then:
+
 ```python
 from raglite import Document
 
@@ -145,7 +158,7 @@ gpt4 = doc.ask("Summarise this document", options={
 })
 
 claude = doc.ask("Summarise this document", options={
-    "llm": {"provider": "anthropic", "model": "claude-3-5-sonnet-20241022", "apiKey": "sk-ant-..."}
+    "llm": {"provider": "anthropic", "model": "claude-sonnet-5-5", "apiKey": "sk-ant-..."}
 })
 ```
 
@@ -275,28 +288,32 @@ raglite serve https://example.com \
 
 ### LLMs
 
-| Provider       | `provider` key | Default model |
-|----------------|----------------|---------------|
-| OpenAI         | `openai`       | `gpt-4o-mini` |
-| Anthropic      | `anthropic`    | `claude-3-5-sonnet-20241022` |
-| Google         | `google`       | `gemini-2.0-flash` |
-| Mistral        | `mistral`      | `mistral-large-latest` |
-| Cohere         | `cohere`       | `command-r-plus` |
-| Groq           | `groq`         | `llama-3.3-70b-versatile` |
-| xAI (Grok)     | `xai`          | `grok-2-latest` |
-| Ollama (local) | `ollama`       | `llama3.2` |
+| Provider       | `provider` key | Default model | Extra |
+|----------------|----------------|---------------|-------|
+| OpenAI         | `openai`       | `gpt-4o-mini` | `[openai]` |
+| Anthropic      | `anthropic`    | `claude-sonnet-5-5` | `[anthropic]` |
+| Google         | `google`       | `gemini-3.8-flash` | `[google]` |
+| Mistral        | `mistral`      | `mistral-large-latest` | `[mistral]` |
+| Cohere         | `cohere`       | `command-a-03-2025` | `[cohere]` |
+| Groq           | `groq`         | `openai/gpt-oss-120b` | `[groq]` |
+| xAI (Grok)     | `xai`          | `grok-4.7` | `[xai]` |
+| Ollama (local) | `ollama`       | `llama3.2` | `[ollama]` |
+
+Anthropic requests send no `temperature` unless you set one, because Claude 5 models reject non-default sampling values.
 
 ### Embeddings
 
-| Provider       | `provider` key | Default model |
-|----------------|----------------|---------------|
-| OpenAI         | `openai`       | `text-embedding-3-small` |
-| Google         | `google`       | `text-embedding-004` |
-| Mistral        | `mistral`      | `mistral-embed` |
-| Cohere         | `cohere`       | `embed-english-v3.0` |
-| Voyage         | `voyage`       | `voyage-3` |
-| Ollama (local) | `ollama`       | `nomic-embed-text` |
-| Local (offline)| `local`        | `all-MiniLM-L6-v2` |
+| Provider       | `provider` key | Default model | Extra |
+|----------------|----------------|---------------|-------|
+| OpenAI         | `openai`       | `text-embedding-3-small` | `[openai]` |
+| Google         | `google`       | `gemini-embedding-2` | `[google]` |
+| Mistral        | `mistral`      | `mistral-embed` | `[mistral]` |
+| Cohere         | `cohere`       | `embed-english-v3.0` | `[cohere]` |
+| Voyage         | `voyage`       | `voyage-3` | `[voyage]` |
+| Ollama (local) | `ollama`       | `nomic-embed-text` | `[ollama]` |
+| Local (offline)| `local`        | `all-MiniLM-L6-v2` | `[local]` |
+
+The Qdrant and Pinecone stores need no extra.
 
 ---
 

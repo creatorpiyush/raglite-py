@@ -2,7 +2,7 @@ from ..types import EmbeddingProviderName
 
 DEFAULT_EMBEDDING_MODELS: dict[EmbeddingProviderName, str] = {
     "openai": "text-embedding-3-small",
-    "google": "text-embedding-004",
+    "google": "gemini-embedding-2",
     "mistral": "mistral-embed",
     "cohere": "embed-english-v3.0",
     "voyage": "voyage-3",
