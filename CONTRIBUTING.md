@@ -21,7 +21,7 @@ bash scripts/pre-commit.sh      # ruff, mypy and tests
 1. Branch from `main` with a descriptive name, such as `fix/pdf-page-numbers` or `feat/pgvector-store`.
 2. Add or update tests (`tests/unit`, `tests/integration`). Tests must not call real provider APIs; patch the embedders and `raglite.llm.answer._generate` as the existing tests do.
 3. Run `bash scripts/pre-commit.sh` inside your virtual environment.
-4. Add an entry under a dated version heading in `CHANGELOG.md`, and update `README.md` if users will notice the change.
+4. Add an entry under a dated version heading in `CHANGELOG.md`, and update the [documentation](#documentation) if users will notice the change.
 5. Open a pull request and fill in the template.
 
 ### Dependencies
@@ -37,6 +37,12 @@ python scripts/sync_shared_fixtures.py --source ../raglite
 ```
 
 CI fails if the copy here differs from the TypeScript SDK's.
+
+## Documentation
+
+The documentation site for both SDKs, https://creatorpiyush.github.io/raglite/, lives in the TypeScript repo under [`docs/`](https://github.com/creatorpiyush/raglite/tree/main/docs). Each code sample has a TypeScript and a Python tab: a user-visible change here needs a docs pull request there, in the same release. Every page has an "Edit page" link.
+
+Keep `README.md` short: it is what PyPI shows, so it links to the site instead of repeating it.
 
 ## Live provider check
 

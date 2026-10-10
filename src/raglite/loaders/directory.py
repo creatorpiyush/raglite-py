@@ -64,11 +64,14 @@ class DirectoryLoader(BaseLoader):
 
         result = DirectoryLoadResult()
 
-        for root, _, files in os.walk(self.dir_path):
+        for root, dirs, files in os.walk(self.dir_path):
+            # Like the TypeScript SDK: skip hidden entries (.git, .venv, the
+            # .raglite store) and node_modules.
+            dirs[:] = [d for d in dirs if not d.startswith(".") and d != "node_modules"]
             if not self.recursive and Path(root) != self.dir_path:
                 continue
 
-            for file in sorted(files):
+            for file in sorted(f for f in files if not f.startswith(".")):
                 full_path = Path(root) / file
                 rel_path = str(full_path.relative_to(self.dir_path))
                 abs_path_str = str(full_path)

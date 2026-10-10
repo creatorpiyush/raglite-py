@@ -5,7 +5,7 @@ try:
     PACKAGE_VERSION = importlib.metadata.version("raglite-toolkit")
 except importlib.metadata.PackageNotFoundError:
     PACKAGE_NAME = "raglite-toolkit"
-    PACKAGE_VERSION = "2.1.0"  # local development fallback
+    PACKAGE_VERSION = "2.1.1"  # local development fallback
 
 # Version of the stored index layout (chunking, ids, payloads). The build cache
 # is keyed on this instead of PACKAGE_VERSION so upgrading the package does not

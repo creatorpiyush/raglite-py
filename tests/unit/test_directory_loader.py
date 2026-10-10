@@ -51,3 +51,16 @@ def test_directory_loader_glob_filter():
         assert res.loaded[0].file_path.endswith("doc1.md")
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def test_directory_loader_skips_hidden_entries_and_node_modules(tmp_path):
+    (tmp_path / "doc.md").write_text("Refunds within 30 days.", encoding="utf-8")
+    (tmp_path / ".notes.md").write_text("hidden file", encoding="utf-8")
+    for skipped in (".raglite/abc", ".venv/lib", "node_modules/pkg"):
+        (tmp_path / skipped).mkdir(parents=True)
+        (tmp_path / skipped / "data.json").write_text('{"k": 1}', encoding="utf-8")
+
+    res = DirectoryLoader(str(tmp_path)).load_files()
+
+    assert [Path(item.file_path).name for item in res.loaded] == ["doc.md"]
+    assert res.errors == []
