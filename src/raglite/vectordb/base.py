@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel
 
@@ -41,8 +41,14 @@ class VectorStore(ABC):
         pass
 
     @abstractmethod
-    def search(self, embedding: List[float], top_k: int) -> List[VectorSearchHit]:
-        pass
+    def search(
+        self, embedding: List[float], top_k: int, filter: Optional[Dict[str, Any]] = None
+    ) -> List[VectorSearchHit]:
+        """``filter`` holds conditions on per-chunk metadata (``chunk``,
+        ``totalChunks``, ``page``, ``pageEnd``, ``section``); see
+        ``matches_filter()``. Apply it before the ``top_k`` cut. Stores
+        written before 2.2 take no ``filter`` argument; Document then filters
+        their results itself, which may return fewer than ``top_k``."""
 
     @abstractmethod
     def count(self) -> int:
@@ -63,7 +69,9 @@ class VectorStore(ABC):
         rebuild."""
         return None
 
-    def keyword_search(self, query: str, top_k: int) -> Optional[List[VectorSearchHit]]:
+    def keyword_search(
+        self, query: str, top_k: int, filter: Optional[Dict[str, Any]] = None
+    ) -> Optional[List[VectorSearchHit]]:
         """Optional. Native keyword search (for example a full-text index),
         used in place of the built-in BM25 index; None if unsupported. Higher
         ``score`` means a better match."""
@@ -75,3 +83,16 @@ class VectorStore(ABC):
 
     def readIndexMetadata(self) -> Optional[IndexMetadata]:
         return self.read_index_metadata()
+
+
+def chunk_metadata_from(raw: Dict[str, Any]) -> ChunkMetadata:
+    """ChunkMetadata from a remote store's payload, keeping page and section."""
+    fields = {k: v for k, v in raw.items() if k != "text" and v is not None}
+    for key in ("chunk", "totalChunks", "page", "pageEnd"):
+        # Pinecone returns stored numbers as floats.
+        if isinstance(fields.get(key), float) and fields[key].is_integer():
+            fields[key] = int(fields[key])
+    fields.setdefault("source", "")
+    fields.setdefault("chunk", 0)
+    fields.setdefault("totalChunks", 0)
+    return ChunkMetadata.model_validate(fields)

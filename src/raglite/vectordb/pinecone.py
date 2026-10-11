@@ -1,11 +1,12 @@
 import json
 import urllib.error
 import urllib.request
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from ..errors import VectorDBError
-from ..types import ChunkMetadata, IndexMetadata, StoredChunk
-from .base import VectorSearchHit, VectorStore
+from ..retrieval.filter import filter_conditions
+from ..types import IndexMetadata, StoredChunk
+from .base import VectorSearchHit, VectorStore, chunk_metadata_from
 
 _METADATA_ID = "__metadata__"
 
@@ -70,7 +71,10 @@ class PineconeVectorStore(VectorStore):
             {
                 "id": c.id,
                 "values": c.embedding,
-                "metadata": dict(c.metadata.model_dump(by_alias=True), text=c.text),
+                # Pinecone rejects null values.
+                "metadata": dict(
+                    c.metadata.model_dump(by_alias=True, exclude_none=True), text=c.text
+                ),
             }
             for c in chunks
         ]
@@ -81,17 +85,18 @@ class PineconeVectorStore(VectorStore):
         )
         self._count_cache += len(chunks)
 
-    def search(self, embedding: List[float], top_k: int) -> List[VectorSearchHit]:
+    def search(
+        self, embedding: List[float], top_k: int, filter: Optional[Dict[str, Any]] = None
+    ) -> List[VectorSearchHit]:
+        body: Dict[str, Any] = {
+            "vector": embedding,
+            "topK": top_k + 1,
+            "includeMetadata": True,
+        }
+        if filter:
+            body["filter"] = pinecone_filter(filter)
         try:
-            data = self._request(
-                "POST",
-                f"/query{self._ns_params()}",
-                {
-                    "vector": embedding,
-                    "topK": top_k + 1,
-                    "includeMetadata": True,
-                },
-            )
+            data = self._request("POST", f"/query{self._ns_params()}", body)
         except VectorDBError:
             return []
 
@@ -101,11 +106,7 @@ class PineconeVectorStore(VectorStore):
                 continue
             meta_raw = m.get("metadata") or {}
             score = float(m.get("score", 0.0))
-            metadata = ChunkMetadata(
-                source=meta_raw.get("source", ""),
-                chunk=int(meta_raw.get("chunk", 0)),
-                totalChunks=int(meta_raw.get("totalChunks", 0)),
-            )
+            metadata = chunk_metadata_from(meta_raw)
             hits.append(
                 VectorSearchHit(
                     id=m["id"],
@@ -167,3 +168,11 @@ class PineconeVectorStore(VectorStore):
             )
         except Exception:
             return None
+
+
+def pinecone_filter(filter: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """Pinecone metadata filter for a chunk filter."""
+    out: Dict[str, Dict[str, Any]] = {}
+    for field, op, value in filter_conditions(filter):
+        out.setdefault(field, {})[f"${op}"] = value
+    return out

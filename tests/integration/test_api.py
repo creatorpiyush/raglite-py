@@ -87,7 +87,7 @@ class TestApiServer:
         assert results[0]["id"] == "1"
         assert results[0]["text"] == "Hello World"
         mock_doc.search.assert_called_once_with(
-            "test query", top_k=3, score_threshold=None, mode=None
+            "test query", top_k=3, score_threshold=None, mode=None, filter=None
         )
 
     def test_ask_returns_answer(self, mock_doc):

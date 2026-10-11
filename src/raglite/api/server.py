@@ -11,6 +11,7 @@ from pydantic import ValidationError
 from ..constants import DEFAULT_HOST, DEFAULT_PORT, PACKAGE_VERSION
 from ..embeddings.models import DEFAULT_EMBEDDING_MODELS
 from ..errors import RagLiteError
+from ..retrieval.filter import validate_filter
 from .schemas import AskRequest, SearchRequest
 
 security = HTTPBearer(auto_error=False)
@@ -120,6 +121,7 @@ def build_app(document: Any, options: Dict[str, Any]) -> FastAPI:
             top_k=req.topK,
             score_threshold=req.scoreThreshold,
             mode=req.mode,
+            filter=req.filter,
         )
         return {
             "results": [r.model_dump(by_alias=True) for r in results]
@@ -137,6 +139,8 @@ def build_app(document: Any, options: Dict[str, Any]) -> FastAPI:
                 "scoreThreshold": req.scoreThreshold,
                 "mode": req.mode,
                 "includeCitations": req.includeCitations,
+                # Validated here, since a streamed answer cannot report it as a 400.
+                "filter": validate_filter(req.filter) if req.filter is not None else None,
             }
 
             if req.stream:

@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from ..text.tokenizer import TOKENIZER_NAME, tokenize
 from ..types import ChunkMetadata, IndexMetadata
 from ..vectordb.base import IndexedChunk
+from .filter import matches_filter
 
 KEYWORD_INDEX_FORMAT = 1
 BM25_K1 = 1.2
@@ -78,7 +79,9 @@ class KeywordIndex:
             "postings": self._postings,
         }
 
-    def search(self, query: str, top_k: int) -> List[KeywordHit]:
+    def search(
+        self, query: str, top_k: int, filter: Optional[Dict[str, Any]] = None
+    ) -> List[KeywordHit]:
         """Chunks matching any query term, best BM25 score first, ties broken by chunk id."""
         n = len(self._chunks)
         if n == 0 or top_k <= 0:
@@ -106,6 +109,7 @@ class KeywordIndex:
                 score=score,
             )
             for i, score in scores.items()
+            if not filter or matches_filter(self._chunks[i].metadata, filter)
         ]
         hits.sort(key=lambda h: (-h.score, h.id))
         return hits[:top_k]

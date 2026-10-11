@@ -19,6 +19,7 @@ from ..errors import BuildCancelledError, FileNotIndexedError, LoaderError, RagL
 from ..llm import generate_answer, stream_answer
 from ..loaders import BaseLoader, get_loader, is_url
 from ..retrieval import Retriever
+from ..retrieval.filter import matches_filter, split_filter
 from ..retrieval.fusion import RankedList, reciprocal_rank_fusion
 from ..retrieval.keyword_index import (
     KeywordHit,
@@ -28,6 +29,7 @@ from ..retrieval.keyword_index import (
     write_keyword_file,
 )
 from ..retrieval.plan import RetrievalPlan, resolve_retrieval_plan
+from ..retrieval.retriever import accepts_filter
 from ..text.scripts import has_unspaced_text
 from ..types import (
     AnswerResult,
@@ -284,11 +286,7 @@ class Document:
 
         self.logger.info(f"Produced {len(chunks)} chunk(s). Embedding...")
 
-        source = (
-            self.file_path
-            if self._inline_text is not None or is_url(self.file_path)
-            else os.path.basename(self.file_path)
-        )
+        source = self.source
         embedder = create_embedder(embed_config)
         # Batches so progress can be reported and a cancelled build stops early.
         vectors: List[List[float]] = []
@@ -369,15 +367,26 @@ class Document:
         score_threshold: Optional[float] = None,
         mode: Optional[str] = None,
         hybrid: Optional[Any] = None,
+        filter: Optional[Dict[str, Any]] = None,
     ) -> List[SearchResult]:
         """Search the indexed document. ``mode`` picks vector (default),
-        keyword or hybrid retrieval."""
+        keyword or hybrid retrieval. ``filter`` keeps only chunks whose
+        metadata matches: ``source``, ``page``, ``pageEnd``, ``section``,
+        ``chunk``, ``totalChunks`` and your own ``metadata`` fields."""
         plan = self.retrieval_plan(
-            options, top_k=top_k, score_threshold=score_threshold, mode=mode, hybrid=hybrid
+            options,
+            top_k=top_k,
+            score_threshold=score_threshold,
+            mode=mode,
+            hybrid=hybrid,
+            filter=filter,
         )
         if plan.mode == "vector":
             self._ensure_ready()
-            return self._vector_search(query, plan.top_k, plan.score_threshold)
+            chunk_filter = self._chunk_filter(plan.filter)
+            if chunk_filter is False:
+                return []
+            return self._vector_search(query, plan.top_k, plan.score_threshold, chunk_filter)
         candidates = self.retrieve_candidates(query, plan)
         if candidates.keyword is None:
             return candidates.vector[: plan.top_k]
@@ -393,6 +402,7 @@ class Document:
         score_threshold: Optional[float] = None,
         mode: Optional[str] = None,
         hybrid: Optional[Any] = None,
+        filter: Optional[Dict[str, Any]] = None,
     ) -> RetrievalPlan:
         """Resolve search options against this document's defaults (internal)."""
         opts = options or {}
@@ -419,7 +429,18 @@ class Document:
             hybrid if hybrid is not None else opts.get("hybrid"),
             tk,
             st,
+            filter if filter is not None else opts.get("filter"),
         )
+
+    def _chunk_filter(self, filter: Optional[Dict[str, Any]]) -> Any:
+        """Check the document-level part of ``filter`` (source and custom
+        metadata) and return the per-chunk part for the store: None for no
+        condition, False when this document cannot match."""
+        if not filter:
+            return None
+        chunk, document = split_filter(filter)
+        fields = {**self.config.metadata, "source": self.source}
+        return chunk if matches_filter(fields, document) else False
 
     def retrieve_candidates(self, query: str, plan: RetrievalPlan) -> RetrievalCandidates:
         """The vector and keyword candidate lists for a keyword or hybrid search,
@@ -427,13 +448,17 @@ class Document:
         documents. Without a keyword index the vector list is returned for
         every mode, so the caller can fall back to vector search."""
         self._ensure_ready()
-        keyword = self._keyword_search(query, plan.candidates)
+        chunk_filter = self._chunk_filter(plan.filter)
+        if chunk_filter is False:
+            return RetrievalCandidates(vector=[], keyword=[])
+        keyword = self._keyword_search(query, plan.candidates, chunk_filter)
         need_vector = keyword is None or (plan.mode == "hybrid" and plan.vector_weight > 0)
         vector = (
             self._vector_search(
                 query,
                 plan.top_k if keyword is None else plan.candidates,
                 plan.score_threshold,
+                chunk_filter,
             )
             if need_vector
             else []
@@ -501,6 +526,13 @@ class Document:
         return self.ask_stream(question, options)
 
     @property
+    def source(self) -> str:
+        """The ``source`` of this document's chunks: the file name, URL or from_text id."""
+        if self._inline_text is not None or is_url(self.file_path):
+            return self.file_path
+        return os.path.basename(self.file_path)
+
+    @property
     def chunk_count(self) -> int:
         return self.store.count()
 
@@ -556,21 +588,60 @@ class Document:
             bearer_token=bearer_token,
         )
 
-    def _vector_search(self, query: str, top_k: int, score_threshold: float) -> List[SearchResult]:
+    def _vector_search(
+        self,
+        query: str,
+        top_k: int,
+        score_threshold: float,
+        filter: Optional[Dict[str, Any]] = None,
+    ) -> List[SearchResult]:
         assert self.embedder is not None  # set by build() or _ensure_ready()
         retriever = Retriever(self.embedder, self.store)
-        return retriever.retrieve(query, top_k=top_k, score_threshold=score_threshold)
+        hits = retriever.retrieve(
+            query, top_k=top_k, score_threshold=score_threshold, filter=filter
+        )
+        return self._finish_hits(hits, filter)
 
-    def _keyword_search(self, query: str, top_k: int) -> Optional[List[KeywordHit]]:
+    def _keyword_search(
+        self, query: str, top_k: int, filter: Optional[Dict[str, Any]] = None
+    ) -> Optional[List[KeywordHit]]:
         """BM25 (or the store's native) keyword search; None when no keyword index exists."""
-        native = self.store.keyword_search(query, top_k)
+        native = (
+            self.store.keyword_search(query, top_k, filter)
+            if filter and accepts_filter(self.store.keyword_search)
+            else self.store.keyword_search(query, top_k)
+        )
         if native is not None:
-            return [
-                KeywordHit(id=h.id, text=h.text, metadata=h.metadata, score=h.score)
-                for h in native
-            ]
+            return self._finish_hits(
+                [
+                    KeywordHit(id=h.id, text=h.text, metadata=h.metadata, score=h.score)
+                    for h in native
+                ],
+                filter,
+            )
         index = self._load_keyword_index()
-        return index.search(query, top_k) if index is not None else None
+        if index is None:
+            return None
+        return self._finish_hits(index.search(query, top_k, filter), filter)
+
+    def _finish_hits(self, hits: List[Any], filter: Optional[Dict[str, Any]]) -> List[Any]:
+        """Drop hits a custom store returned despite the filter, and add the
+        document's custom metadata to each hit."""
+        if filter:
+            hits = [h for h in hits if matches_filter(h.metadata, filter)]
+        custom = self.config.metadata
+        if not custom:
+            return hits
+        return [
+            h.model_copy(
+                update={
+                    "metadata": ChunkMetadata.model_validate(
+                        {**h.metadata.model_dump(by_alias=True), **custom}
+                    )
+                }
+            )
+            for h in hits
+        ]
 
     def _load_keyword_index(self) -> Optional[KeywordIndex]:
         if self._keyword_index is not None:
@@ -697,7 +768,7 @@ def fusion_lists(
     ]
 
 
-_SEARCH_KEYS = ("topK", "top_k", "scoreThreshold", "score_threshold", "mode", "hybrid")
+_SEARCH_KEYS = ("topK", "top_k", "scoreThreshold", "score_threshold", "mode", "hybrid", "filter")
 
 
 def search_options_of(options: Dict[str, Any]) -> Dict[str, Any]:

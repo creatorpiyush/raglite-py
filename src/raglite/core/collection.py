@@ -171,9 +171,11 @@ class DocumentCollection:
         score_threshold: Optional[float] = None,
         mode: Optional[str] = None,
         hybrid: Optional[Any] = None,
+        filter: Optional[Dict[str, Any]] = None,
     ) -> List[SearchResult]:
         """Search across all documents in the collection. ``mode`` picks vector
-        (default), keyword or hybrid retrieval."""
+        (default), keyword or hybrid retrieval; ``filter`` works as in
+        Document.search()."""
         opts = options or {}
         tk = top_k if top_k is not None else opts.get("topK", opts.get("top_k", self.config.topK))
         st = score_threshold if score_threshold is not None else opts.get("scoreThreshold", opts.get("score_threshold", self.config.scoreThreshold))
@@ -183,6 +185,7 @@ class DocumentCollection:
             hybrid if hybrid is not None else opts.get("hybrid"),
             tk,
             st,
+            filter if filter is not None else opts.get("filter"),
         )
 
         self._ensure_ready()
@@ -192,7 +195,10 @@ class DocumentCollection:
 
         if plan.mode == "vector":
             per_doc = self._settle(
-                docs, lambda doc: doc.search(query, top_k=tk * 2, score_threshold=st, mode="vector")
+                docs,
+                lambda doc: doc.search(
+                    query, top_k=tk * 2, score_threshold=st, mode="vector", filter=plan.filter
+                ),
             )
             all_hits = [hit for hits in per_doc for hit in hits]
             all_hits.sort(key=lambda h: h.score, reverse=True)

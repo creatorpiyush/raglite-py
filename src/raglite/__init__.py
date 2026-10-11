@@ -50,6 +50,7 @@ from .retrieval import (
     RankedList,
     RetrievalPlan,
     Retriever,
+    matches_filter,
     reciprocal_rank_fusion,
     resolve_retrieval_plan,
 )
@@ -124,6 +125,7 @@ __all__ = [
     "VectorSearchHit",
     "IndexedChunk",
     "Retriever",
+    "matches_filter",
     "KeywordIndex",
     "KeywordHit",
     "RankedList",

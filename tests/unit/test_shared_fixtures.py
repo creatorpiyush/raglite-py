@@ -8,7 +8,8 @@ from pathlib import Path
 import pytest
 
 from raglite.chunking import RecursiveChunker
-from raglite.errors import ChunkingError
+from raglite.errors import ChunkingError, ConfigError
+from raglite.retrieval.filter import matches_filter, validate_filter
 from raglite.retrieval.fusion import RankedList, reciprocal_rank_fusion
 from raglite.retrieval.keyword_index import KeywordHit, KeywordIndex
 from raglite.text import tokenize
@@ -133,3 +134,15 @@ def test_citations(case):
         for n in (1, 2, 3)
     ]
     assert [c.n for c in extract_citations(case["answer"], context)] == case["cited"]
+
+
+_FILTER = _load("filter.json")
+
+
+@pytest.mark.parametrize("case", _FILTER["cases"], ids=lambda c: c["name"])
+def test_metadata_filter(case):
+    if case.get("error"):
+        with pytest.raises(ConfigError):
+            validate_filter(case["filter"])
+    else:
+        assert matches_filter(_FILTER["metadata"], validate_filter(case["filter"])) is case["matches"]
