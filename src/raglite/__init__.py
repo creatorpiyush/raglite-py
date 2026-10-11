@@ -21,6 +21,7 @@ from .errors import (
     UnsupportedFileTypeError,
     VectorDBError,
 )
+from .eval import EvalQuestion, EvalReport, EvalRow, evaluate, format_report, parse_questions
 from .llm import (
     DEFAULT_LLM_MODELS,
     build_system_prompt,
@@ -81,6 +82,12 @@ from .vectordb.base import IndexedChunk, VectorSearchHit, VectorStore
 VERSION = PACKAGE_VERSION
 
 __all__ = [
+    "EvalQuestion",
+    "EvalReport",
+    "EvalRow",
+    "evaluate",
+    "format_report",
+    "parse_questions",
     "DEFAULT_RERANK_MODELS",
     "Reranker",
     "PACKAGE_NAME",
