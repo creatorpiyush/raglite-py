@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.2.0] - 2026-10-11
+
+### Added
+- **Metadata filters:** `search()`, `ask()`, `ask_stream()` and the REST `/search` and `/ask` endpoints take `filter`, such as `{"source": "policy.pdf", "page": {"gte": 3}}`. A plain value means equality; `in`, `gt`, `gte`, `lt` and `lte` are the operators, and every field must match. Chunk fields are filtered inside the store before the `top_k` cut: in memory, in the keyword index, and as Qdrant and Pinecone payload filters. See [Metadata filters](https://creatorpiyush.github.io/raglite/guides/filters/).
+- **Custom metadata:** the `metadata` option, such as `{"tenant": "acme"}`, adds your own fields to every search result and makes them filterable. Changing it needs no rebuild.
+- **Reranking:** `rerank={"provider": "cohere" | "voyage" | "llm"}` or your own function reorders `candidates` results (default 30) before the `top_k` cut, using the `cohere` and `voyage` extras. `score` becomes the reranker's score and `scores.rerank` records it. If the reranker fails, a warning is logged and the retrieval order is kept. Off by default; set a default with the `rerank` option and turn it off per call with `rerank=False`. See [Reranking](https://creatorpiyush.github.io/raglite/guides/reranking/).
+- **`raglite eval <path> questions.jsonl`** reports recall@k, MRR and hit rate for each retrieval mode side by side, plus each mode reranked with `--rerank`, and `--json` for CI. Also `evaluate()`, `parse_questions()` and `format_report()` from code. See [Evaluating retrieval](https://creatorpiyush.github.io/raglite/guides/evaluation/).
+- `matches_filter()`, `DEFAULT_RERANK_MODELS` and `Reranker` are exported.
+
+### Changed
+- `VectorStore.search()` and `keyword_search()` take an optional `filter` argument. Custom stores need no change: stores whose methods do not accept it are called as before and their results filtered afterwards, though a filtered search may then return fewer than `top_k`.
+
+### Fixed
+- The Qdrant and Pinecone stores returned only `source`, `chunk` and `totalChunks`, so citations lost their page and section. They now return `page`, `pageEnd` and `section`, which both stores already saved, so no rebuild is needed.
+
 ## [2.1.1] - 2026-10-10
 
 ### Added
