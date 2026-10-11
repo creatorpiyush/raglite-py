@@ -9,6 +9,7 @@ from .constants import (
     DEFAULT_STORE_DIRNAME,
     DEFAULT_TOP_K,
 )
+from .retrieval.filter import validate_custom_metadata
 from .types import (
     EmbeddingProviderConfig,
     LLMProviderConfig,
@@ -32,6 +33,12 @@ class DocumentOptions(BaseModel):
     logLevel: Optional[str] = Field(default=None, alias="logLevel")
     # Default retrieval mode and hybrid options for search(), ask() and ask_stream().
     retrieval: Optional[RetrievalOptions] = None
+    # Your own fields (for example {"tenant": "acme"}), added to every search
+    # result's metadata and usable in filter. Changing them needs no rebuild.
+    metadata: Optional[Dict[str, Any]] = None
+    # Default reranker for search(), ask() and ask_stream(): a dict such as
+    # {"provider": "cohere"} or a function (query, hits) -> hits. Off unless set.
+    rerank: Optional[Any] = None
 
 
 class ResolvedConfig(BaseModel):
@@ -47,6 +54,8 @@ class ResolvedConfig(BaseModel):
     vectorStore: Optional[VectorStoreProviderConfig] = Field(default=None, alias="vectorStore")
     logLevel: str = Field(..., alias="logLevel")
     retrieval: RetrievalOptions = Field(default_factory=RetrievalOptions)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    rerank: Optional[Any] = None
 
 
 def resolve_config(options: Optional[Union[DocumentOptions, Dict[str, Any]]] = None) -> ResolvedConfig:
@@ -80,4 +89,6 @@ def resolve_config(options: Optional[Union[DocumentOptions, Dict[str, Any]]] = N
         vectorStore=opts.vectorStore,
         logLevel=log_level,
         retrieval=opts.retrieval or RetrievalOptions(),
+        metadata=validate_custom_metadata(opts.metadata) if opts.metadata is not None else {},
+        rerank=opts.rerank or None,
     )

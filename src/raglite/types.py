@@ -114,6 +114,7 @@ class SearchScores(BaseModel):
     vector: Optional[float] = None  # cosine similarity, when in the vector results
     keyword: Optional[float] = None  # BM25 score, when in the keyword results
     fused: Optional[float] = None  # raw RRF score; ``score`` is this normalised to [0, 1]
+    rerank: Optional[float] = None  # the reranker's score, when rerank is set; ``score`` equals it
 
     @model_serializer(mode="wrap")
     def _drop_missing(self, handler: Any) -> Dict[str, Any]:

@@ -11,6 +11,7 @@ from ..loaders import DirectoryLoader, is_supported_file, is_url
 from ..retrieval.fusion import reciprocal_rank_fusion
 from ..retrieval.keyword_index import KeywordHit
 from ..retrieval.plan import resolve_retrieval_plan
+from ..retrieval.rerank import rerank_candidates, rerank_hits
 from ..types import AnswerResult, SearchResult
 from ..utils.logger import Logger, create_logger
 from ..vectordb import VectorStore
@@ -171,10 +172,38 @@ class DocumentCollection:
         score_threshold: Optional[float] = None,
         mode: Optional[str] = None,
         hybrid: Optional[Any] = None,
+        filter: Optional[Dict[str, Any]] = None,
+        rerank: Optional[Any] = None,
     ) -> List[SearchResult]:
         """Search across all documents in the collection. ``mode`` picks vector
-        (default), keyword or hybrid retrieval."""
+        (default), keyword or hybrid retrieval; ``filter`` and ``rerank``
+        work as in Document.search(), with one rerank over the merged
+        results."""
         opts = options or {}
+        rr = rerank if rerank is not None else opts.get("rerank")
+        if rr is None:
+            rr = self.config.rerank
+        kwargs: Dict[str, Any] = dict(
+            score_threshold=score_threshold, mode=mode, hybrid=hybrid, filter=filter
+        )
+        if not rr:
+            return self._retrieve(query, opts, top_k=top_k, **kwargs)
+        tk = top_k if top_k is not None else opts.get("topK", opts.get("top_k", self.config.topK))
+        hits = self._retrieve(query, opts, top_k=rerank_candidates(rr, tk), **kwargs)
+        return rerank_hits(query, hits, rr, tk, logger=self.logger, llm=self.config.llm)
+
+    def _retrieve(
+        self,
+        query: str,
+        opts: Dict[str, Any],
+        *,
+        top_k: Optional[int],
+        score_threshold: Optional[float],
+        mode: Optional[str],
+        hybrid: Optional[Any],
+        filter: Optional[Dict[str, Any]],
+    ) -> List[SearchResult]:
+        """Merged retrieval over every document, without reranking."""
         tk = top_k if top_k is not None else opts.get("topK", opts.get("top_k", self.config.topK))
         st = score_threshold if score_threshold is not None else opts.get("scoreThreshold", opts.get("score_threshold", self.config.scoreThreshold))
         plan = resolve_retrieval_plan(
@@ -183,6 +212,7 @@ class DocumentCollection:
             hybrid if hybrid is not None else opts.get("hybrid"),
             tk,
             st,
+            filter if filter is not None else opts.get("filter"),
         )
 
         self._ensure_ready()
@@ -192,7 +222,15 @@ class DocumentCollection:
 
         if plan.mode == "vector":
             per_doc = self._settle(
-                docs, lambda doc: doc.search(query, top_k=tk * 2, score_threshold=st, mode="vector")
+                docs,
+                lambda doc: doc.search(
+                    query,
+                    top_k=tk * 2,
+                    score_threshold=st,
+                    mode="vector",
+                    filter=plan.filter,
+                    rerank=False,
+                ),
             )
             all_hits = [hit for hits in per_doc for hit in hits]
             all_hits.sort(key=lambda h: h.score, reverse=True)

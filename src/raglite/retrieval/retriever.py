@@ -1,4 +1,5 @@
-from typing import Any, Dict, List, Optional
+import inspect
+from typing import Any, Callable, Dict, List, Optional
 
 from ..embeddings.base import Embedder
 from ..types import SearchResult
@@ -17,6 +18,7 @@ class Retriever:
         *,
         top_k: Optional[int] = None,
         score_threshold: Optional[float] = None,
+        filter: Optional[Dict[str, Any]] = None,
     ) -> List[SearchResult]:
         opts = options or {}
 
@@ -40,7 +42,12 @@ class Retriever:
         threshold = st if st is not None else 0.0
 
         embedding = self.embedder.embed_query(query)
-        hits = self.store.search(embedding, tk)
+        # Stores written before 2.2 take no filter; Document filters their results.
+        hits = (
+            self.store.search(embedding, tk, filter)
+            if filter and accepts_filter(self.store.search)
+            else self.store.search(embedding, tk)
+        )
 
         results = []
         for h in hits:
@@ -55,3 +62,11 @@ class Retriever:
                     )
                 )
         return results
+
+
+def accepts_filter(method: Callable[..., Any]) -> bool:
+    """True when a store method takes a ``filter`` argument."""
+    try:
+        return "filter" in inspect.signature(method).parameters
+    except (TypeError, ValueError):
+        return False

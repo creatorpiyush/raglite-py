@@ -19,6 +19,10 @@ Usage:
   raglite serve <path|url>            --llm-provider P [--llm-key K] [--host H] [--port N] [--token T] [--mode M]
   raglite mcp <path|url>              [--llm-provider P] [--llm-model M] [--llm-key K] [--mode M]
                              MCP server over stdio (needs: pip install 'raglite-toolkit[mcp]')
+  raglite eval <path|url> questions.jsonl   [--top-k N] [--modes vector,keyword,hybrid] [--json]
+                             [--rerank cohere|voyage|llm] [--rerank-model M] [--rerank-key K] [--llm-provider P]
+                             Scores retrieval: recall@k, MRR and hit rate per mode. Each line of the file is
+                             {{"question": "...", "expected": ["text the passage contains", {{"source": "a.pdf", "page": 3}}]}}
   raglite --help
   raglite --version
 
@@ -252,6 +256,53 @@ def run_mcp(args):
     serve_mcp(target)
 
 
+def run_eval(args):
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("file")
+    parser.add_argument("questions")
+    parser.add_argument("--top-k", type=int, default=5)
+    parser.add_argument("--modes")
+    parser.add_argument("--rerank", choices=("cohere", "voyage", "llm"))
+    parser.add_argument("--rerank-model")
+    parser.add_argument("--rerank-key")
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("--embed-provider")
+    parser.add_argument("--embed-model")
+    parser.add_argument("--embed-key")
+    parser.add_argument("--llm-provider")
+    parser.add_argument("--llm-model")
+    parser.add_argument("--llm-key")
+    parser.add_argument("--store-dir")
+    parsed = parser.parse_args(args)
+
+    modes = [m.strip() for m in parsed.modes.split(",")] if parsed.modes else None
+    for mode in modes or []:
+        if mode not in _MODES:
+            raise ValueError(f'--modes takes vector, keyword and hybrid, comma-separated (got "{mode}")')
+
+    from .eval import evaluate, format_report, parse_questions
+
+    with open(parsed.questions, encoding="utf-8") as f:
+        questions = parse_questions(f.read())
+    options: dict = _with_embeddings({}, parse_common_embedding(vars(parsed)))
+    llm = parse_llm(vars(parsed))
+    if llm:
+        options["llm"] = llm
+    target = resolve_target(parsed.file, options, parsed.store_dir)
+    target.build()
+
+    rerank = None
+    if parsed.rerank:
+        rerank = {"provider": parsed.rerank}
+        if parsed.rerank_model:
+            rerank["model"] = parsed.rerank_model
+        if parsed.rerank_key:
+            rerank["apiKey"] = parsed.rerank_key
+    report = evaluate(target, questions, top_k=parsed.top_k, modes=modes, rerank=rerank)
+    out = json.dumps(report.to_dict(), indent=2) if parsed.json else format_report(report)
+    sys.stdout.write(f"{out}\n")
+
+
 def main():
     argv = sys.argv[1:]
     if not argv or argv[0] in ("--help", "-h", "help"):
@@ -277,6 +328,8 @@ def main():
             run_serve(args)
         elif command == "mcp":
             run_mcp(args)
+        elif command == "eval":
+            run_eval(args)
         else:
             sys.stderr.write(f"Unknown command: {command}\n\n{HELP}")
             sys.stderr.flush()

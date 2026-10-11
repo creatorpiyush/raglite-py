@@ -4,6 +4,7 @@ from typing import Any, Dict, Optional, Union
 from ..constants import DEFAULT_RRF_K, MIN_HYBRID_CANDIDATES
 from ..errors import ConfigError
 from ..types import HybridOptions, RetrievalOptions
+from .filter import validate_filter
 
 _MODES = ("vector", "keyword", "hybrid")
 
@@ -19,6 +20,7 @@ class RetrievalPlan:
     candidates: int
     vector_weight: float
     keyword_weight: float
+    filter: Optional[Dict[str, Any]] = None
 
 
 def _hybrid(value: Union[None, HybridOptions, Dict[str, Any]]) -> HybridOptions:
@@ -38,6 +40,7 @@ def resolve_retrieval_plan(
     hybrid: Union[None, HybridOptions, Dict[str, Any]],
     top_k: int,
     score_threshold: float,
+    filter: Optional[Dict[str, Any]] = None,
 ) -> RetrievalPlan:
     """Merge per-call options over the configured defaults and validate the result."""
     resolved_mode = mode or defaults.mode or "vector"
@@ -72,4 +75,5 @@ def resolve_retrieval_plan(
         candidates=max(candidates, top_k),
         vector_weight=vector_weight,
         keyword_weight=keyword_weight,
+        filter=validate_filter(filter) if filter is not None else None,
     )

@@ -1,9 +1,10 @@
 import json
 import os
 import shutil
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from ..errors import VectorDBError
+from ..retrieval.filter import matches_filter
 from ..types import IndexMetadata, StoredChunk
 from .base import IndexedChunk, VectorSearchHit, VectorStore
 
@@ -49,12 +50,13 @@ class MemoryVectorStore(VectorStore):
         self.chunks.extend(chunks)
         self._persist()
 
-    def search(self, embedding: List[float], top_k: int) -> List[VectorSearchHit]:
-        if not self.chunks:
-            return []
-
+    def search(
+        self, embedding: List[float], top_k: int, filter: Optional[Dict[str, Any]] = None
+    ) -> List[VectorSearchHit]:
         scored = []
         for c in self.chunks:
+            if filter and not matches_filter(c.metadata, filter):
+                continue
             score = self._dot(embedding, c.embedding)
             scored.append(
                 VectorSearchHit(

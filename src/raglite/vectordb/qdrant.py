@@ -2,11 +2,12 @@ import hashlib
 import json
 import urllib.error
 import urllib.request
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from ..errors import VectorDBError
-from ..types import ChunkMetadata, IndexMetadata, StoredChunk
-from .base import IndexedChunk, VectorSearchHit, VectorStore
+from ..retrieval.filter import filter_conditions
+from ..types import IndexMetadata, StoredChunk
+from .base import IndexedChunk, VectorSearchHit, VectorStore, chunk_metadata_from
 
 
 def _uuid_from_str(s: str) -> str:
@@ -113,14 +114,19 @@ class QdrantVectorStore(VectorStore):
         self._request("PUT", f"/collections/{self._collection}/points", {"points": points})
         self._count_cache += len(chunks)
 
-    def search(self, embedding: List[float], top_k: int) -> List[VectorSearchHit]:
+    def search(
+        self, embedding: List[float], top_k: int, filter: Optional[Dict[str, Any]] = None
+    ) -> List[VectorSearchHit]:
         body: dict = {
             "vector": embedding,
             "limit": top_k + 1,
             "with_payload": True,
         }
-        if self._shared:
-            body["filter"] = self._namespace_filter()
+        must = (self._namespace_filter()["must"] if self._shared else []) + (
+            qdrant_conditions(filter) if filter else []
+        )
+        if must:
+            body["filter"] = {"must": must}
         try:
             data = self._request(
                 "POST",
@@ -135,12 +141,7 @@ class QdrantVectorStore(VectorStore):
             payload = r.get("payload", {}) or {}
             if r.get("id") == self._metadata_id or payload.get("isMetadata"):
                 continue
-            raw_meta = payload.get("metadata") or {}
-            metadata = ChunkMetadata(
-                source=raw_meta.get("source", ""),
-                chunk=raw_meta.get("chunk", 0),
-                totalChunks=raw_meta.get("totalChunks", 0),
-            )
+            metadata = chunk_metadata_from(payload.get("metadata") or {})
             score = float(r.get("score", 0.0))
             hits.append(
                 VectorSearchHit(
@@ -171,16 +172,11 @@ class QdrantVectorStore(VectorStore):
                 payload = p.get("payload") or {}
                 if p.get("id") == self._metadata_id or payload.get("isMetadata"):
                     continue
-                raw_meta = payload.get("metadata") or {}
                 chunks.append(
                     IndexedChunk(
                         id=payload.get("id", p.get("id")),
                         text=payload.get("text", ""),
-                        metadata=ChunkMetadata(
-                            source=raw_meta.get("source", ""),
-                            chunk=raw_meta.get("chunk", 0),
-                            totalChunks=raw_meta.get("totalChunks", 0),
-                        ),
+                        metadata=chunk_metadata_from(payload.get("metadata") or {}),
                     )
                 )
             offset = result.get("next_page_offset")
@@ -243,3 +239,19 @@ class QdrantVectorStore(VectorStore):
             )
         except Exception:
             return None
+
+
+def qdrant_conditions(filter: Dict[str, Any]) -> List[dict]:
+    """Qdrant payload conditions for a chunk filter; chunk metadata lives under ``metadata``."""
+    out: List[dict] = []
+    ranges: Dict[str, Dict[str, Any]] = {}
+    for field, op, value in filter_conditions(filter):
+        key = f"metadata.{field}"
+        if op == "eq":
+            out.append({"key": key, "match": {"value": value}})
+        elif op == "in":
+            out.append({"key": key, "match": {"any": value}})
+        else:
+            ranges.setdefault(key, {})[op] = value
+    out.extend({"key": key, "range": bounds} for key, bounds in ranges.items())
+    return out

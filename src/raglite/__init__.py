@@ -21,6 +21,7 @@ from .errors import (
     UnsupportedFileTypeError,
     VectorDBError,
 )
+from .eval import EvalQuestion, EvalReport, EvalRow, evaluate, format_report, parse_questions
 from .llm import (
     DEFAULT_LLM_MODELS,
     build_system_prompt,
@@ -45,11 +46,14 @@ from .loaders import (
 )
 from .mcp_server import create_mcp_server, serve_mcp
 from .retrieval import (
+    DEFAULT_RERANK_MODELS,
     KeywordHit,
     KeywordIndex,
     RankedList,
+    Reranker,
     RetrievalPlan,
     Retriever,
+    matches_filter,
     reciprocal_rank_fusion,
     resolve_retrieval_plan,
 )
@@ -78,6 +82,14 @@ from .vectordb.base import IndexedChunk, VectorSearchHit, VectorStore
 VERSION = PACKAGE_VERSION
 
 __all__ = [
+    "EvalQuestion",
+    "EvalReport",
+    "EvalRow",
+    "evaluate",
+    "format_report",
+    "parse_questions",
+    "DEFAULT_RERANK_MODELS",
+    "Reranker",
     "PACKAGE_NAME",
     "PACKAGE_VERSION",
     "VERSION",
@@ -124,6 +136,7 @@ __all__ = [
     "VectorSearchHit",
     "IndexedChunk",
     "Retriever",
+    "matches_filter",
     "KeywordIndex",
     "KeywordHit",
     "RankedList",

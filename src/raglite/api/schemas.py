@@ -1,4 +1,4 @@
-from typing import Literal, Optional
+from typing import Any, Dict, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -12,6 +12,8 @@ class SearchRequest(BaseModel):
         default=None, alias="scoreThreshold", ge=-1.0, le=1.0
     )
     mode: Optional[Literal["vector", "keyword", "hybrid"]] = None
+    # Checked in depth by validate_filter(), which answers 400 ConfigError.
+    filter: Optional[Dict[str, Any]] = None
 
 
 class AskRequest(BaseModel):
@@ -23,6 +25,8 @@ class AskRequest(BaseModel):
         default=None, alias="scoreThreshold", ge=-1.0, le=1.0
     )
     mode: Optional[Literal["vector", "keyword", "hybrid"]] = None
+    # Checked in depth by validate_filter(), which answers 400 ConfigError.
+    filter: Optional[Dict[str, Any]] = None
     includeCitations: Optional[bool] = Field(
         default=None, alias="includeCitations"
     )
