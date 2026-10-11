@@ -29,6 +29,7 @@ from ..retrieval.keyword_index import (
     write_keyword_file,
 )
 from ..retrieval.plan import RetrievalPlan, resolve_retrieval_plan
+from ..retrieval.rerank import rerank_candidates, rerank_hits
 from ..retrieval.retriever import accepts_filter
 from ..text.scripts import has_unspaced_text
 from ..types import (
@@ -368,13 +369,41 @@ class Document:
         mode: Optional[str] = None,
         hybrid: Optional[Any] = None,
         filter: Optional[Dict[str, Any]] = None,
+        rerank: Optional[Any] = None,
     ) -> List[SearchResult]:
         """Search the indexed document. ``mode`` picks vector (default),
         keyword or hybrid retrieval. ``filter`` keeps only chunks whose
         metadata matches: ``source``, ``page``, ``pageEnd``, ``section``,
-        ``chunk``, ``totalChunks`` and your own ``metadata`` fields."""
+        ``chunk``, ``totalChunks`` and your own ``metadata`` fields.
+        ``rerank`` reorders the first ``candidates`` results with a reranking
+        model (or your function) before the ``top_k`` cut; ``False`` turns off
+        the default."""
+        opts = options or {}
+        rr = rerank if rerank is not None else opts.get("rerank")
+        if rr is None:
+            rr = self.config.rerank
+        kwargs: Dict[str, Any] = dict(
+            score_threshold=score_threshold, mode=mode, hybrid=hybrid, filter=filter
+        )
+        if not rr:
+            return self._retrieve(query, opts, top_k=top_k, **kwargs)
+        tk = self.retrieval_plan(opts, top_k=top_k).top_k
+        hits = self._retrieve(query, opts, top_k=rerank_candidates(rr, tk), **kwargs)
+        return rerank_hits(query, hits, rr, tk, logger=self.logger, llm=self.config.llm)
+
+    def _retrieve(
+        self,
+        query: str,
+        opts: Dict[str, Any],
+        *,
+        top_k: Optional[int],
+        score_threshold: Optional[float],
+        mode: Optional[str],
+        hybrid: Optional[Any],
+        filter: Optional[Dict[str, Any]],
+    ) -> List[SearchResult]:
         plan = self.retrieval_plan(
-            options,
+            opts,
             top_k=top_k,
             score_threshold=score_threshold,
             mode=mode,
@@ -768,7 +797,16 @@ def fusion_lists(
     ]
 
 
-_SEARCH_KEYS = ("topK", "top_k", "scoreThreshold", "score_threshold", "mode", "hybrid", "filter")
+_SEARCH_KEYS = (
+    "topK",
+    "top_k",
+    "scoreThreshold",
+    "score_threshold",
+    "mode",
+    "hybrid",
+    "filter",
+    "rerank",
+)
 
 
 def search_options_of(options: Dict[str, Any]) -> Dict[str, Any]:

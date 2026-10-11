@@ -45,9 +45,11 @@ from .loaders import (
 )
 from .mcp_server import create_mcp_server, serve_mcp
 from .retrieval import (
+    DEFAULT_RERANK_MODELS,
     KeywordHit,
     KeywordIndex,
     RankedList,
+    Reranker,
     RetrievalPlan,
     Retriever,
     matches_filter,
@@ -79,6 +81,8 @@ from .vectordb.base import IndexedChunk, VectorSearchHit, VectorStore
 VERSION = PACKAGE_VERSION
 
 __all__ = [
+    "DEFAULT_RERANK_MODELS",
+    "Reranker",
     "PACKAGE_NAME",
     "PACKAGE_VERSION",
     "VERSION",
